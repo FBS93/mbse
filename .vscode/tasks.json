@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "TASKS_PATH": "${workspaceFolder}/.vscode/tasks"
+    }
+  },
+  "tasks": [
+    {
+      "label": "run_opencode_web_gui",
+      "type": "shell",
+      "command": "${TASKS_PATH}/run_opencode_web_gui.sh"
+    }
+  ]
+}

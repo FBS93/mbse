@@ -1,0 +1,19 @@
+{
+  "workbench.tree.indent": 16,
+  "workbench.tree.expandMode": "doubleClick",
+  "editor.autoIndent": "full",
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "git.autofetch": true,
+  "debug.showInStatusBar": "always",
+  "VsCodeTaskButtons.tasks": [
+    {
+      "label": "🌐 OpenCode web GUI",
+      "task": "run_opencode_web_gui"
+    }
+  ],
+  "files.associations": {
+    "*.py": "python"
+  }
+}

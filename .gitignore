@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.viewer-js-venv/
+.python-packages/
+.mbse-rendered/
+.mbse-cli-state/
+build/mbse_runtime/
