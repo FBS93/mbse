@@ -8,21 +8,19 @@ An HSM model document contains:
 
 - `schema_version`: must be `mbse-hsm-model-v0`.
 - `document_id`: stable identifier for the model document.
-- `enums`: optional global reusable enumerations.
-- `variables`: optional typed runtime variables with default values.
 - `events`: handled event declarations and optional typed parameters.
 - `initial_transition`: required root initial target.
 - `states`: top-level states, each of which may contain nested states.
 
 ## Typed values
 
-Variables and event parameters share the same typed declaration model.
+Event parameters use the shared typed declaration model.
 
 - `signed`, `unsigned`, and `float` declare mandatory `min` and `max` bounds.
 - `bool` carries no extra attributes.
 - `enum` references one global enum by `enum_id`.
 
-Enums are defined once at document scope and reused where needed.
+Enum parameters reference shared context enums by `enum_id`.
 
 ## State elements
 
@@ -47,16 +45,16 @@ Each state defines a subset of these elements:
 - `external_transition.activities`: activities executed after exits and before new entries.
 - `external_transition.guard_condition`: alternative to `target_id`; contains one `guard_activity` plus `true_branch` and `false_branch` targets with optional branch-specific activities.
 
-## Callable references
+## Executable references
 
 Hooks, activities, and guards are declared as:
 
 ```json
-{ "module": "some.module", "name": "some_callable" }
+{ "kind": "action_language", "module": "some.module", "name": "some_executable" }
 ```
 
-- Hook and activity callables may mutate runtime variables.
-- Guard callables must return `true` or `false`.
+- Hook and activity executables may mutate runtime variables.
+- Guard executables must return `true` or `false`.
 
 ## Representative example
 
@@ -64,14 +62,6 @@ Hooks, activities, and guards are declared as:
 {
   "schema_version": "mbse-hsm-model-v0",
   "document_id": "door_controller",
-  "enums": [],
-  "variables": [
-    {
-      "name": "is_locked",
-      "type": "bool",
-      "default_value": true
-    }
-  ],
   "events": [
     { "id": "unlock", "label": "Unlock" },
     { "id": "open", "label": "Open" }
@@ -83,7 +73,7 @@ Hooks, activities, and guards are declared as:
       "label": "Closed",
       "hooks": {
         "on_entry": [
-          { "module": "app.hsm_actions", "name": "closed_entry" }
+          { "kind": "action_language", "module": "app.hsm_actions", "name": "closed_entry" }
         ]
       },
       "external_transitions": [
@@ -91,13 +81,14 @@ Hooks, activities, and guards are declared as:
           "event_id": "unlock",
           "guard_condition": {
             "guard_activity": {
+              "kind": "action_language",
               "module": "app.hsm_actions",
               "name": "can_unlock"
             },
             "true_branch": {
               "target_id": "closed",
               "activities": [
-                { "module": "app.hsm_actions", "name": "unlock_action" }
+                { "kind": "action_language", "module": "app.hsm_actions", "name": "unlock_action" }
               ]
             },
             "false_branch": {
@@ -109,7 +100,7 @@ Hooks, activities, and guards are declared as:
           "event_id": "open",
           "target_id": "opened",
           "activities": [
-            { "module": "app.hsm_actions", "name": "open_action" }
+            { "kind": "action_language", "module": "app.hsm_actions", "name": "open_action" }
           ]
         }
       ]

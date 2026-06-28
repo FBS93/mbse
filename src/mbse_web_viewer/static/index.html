@@ -14,6 +14,10 @@
             <summary>View</summary>
             <form id="view-mode-form">
               <div class="inline-control-row">
+                <label class="inline-control-label" for="model-select">Model</label>
+                <select id="model-select" name="model_id"></select>
+              </div>
+              <div class="inline-control-row">
                 <label class="inline-control-label" for="view-mode-select">Mode</label>
                 <select id="view-mode-select" name="view_mode">
                   <option value="normal">Normal</option>
@@ -126,6 +130,6 @@
         </div>
       </section>
     </main>
-    <script src="/viewer.js"></script>
+    <script type="module" src="/viewer.js"></script>
   </body>
 </html>

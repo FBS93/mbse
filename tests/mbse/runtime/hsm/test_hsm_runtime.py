@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+from mbse.model.context.context_model import ContextModel
 from mbse.model.hsm.hsm_model import HsmModel
 from mbse.runtime.hsm.hsm_runtime import HsmRuntime
 
@@ -9,16 +13,49 @@ from mbse.runtime.hsm.hsm_runtime import HsmRuntime
 FIXTURE_PATH = (
   Path(__file__).resolve().parents[3] / "reference_model" / "hsm" / "reference_hsm_model.json"
 )
+CONTEXT_PATH = (
+  Path(__file__).resolve().parents[3]
+  / "reference_model"
+  / "context"
+  / "reference_context_model.json"
+)
 
 
 def _build_runtime() -> HsmRuntime:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
+  context = ContextModel.loadAndValidate(CONTEXT_PATH)
   runtime = HsmRuntime()
-  runtime.init(model)
+  runtime.setExecutableHandler(_execute_action_language)
+  runtime.init(model, context)
   return runtime
 
 
-def _traceCallableNames(runtime: HsmRuntime, trace_index: int = -1) -> list[str]:
+def _execute_action_language(
+  executable_ref: dict[str, Any],
+  runtime: HsmRuntime,
+  event: dict[str, Any] | None,
+) -> Any:
+  module = importlib.import_module(executable_ref["module"])
+  handler = getattr(module, executable_ref["name"])
+  ctx = SimpleNamespace(**runtime.variables)
+  ctx.variables = runtime.variables
+  ctx.event_id = event["event_id"] if event is not None else None
+  ctx.event_parameters = event["parameters"] if event is not None else {}
+  ctx.send_event = lambda nested_event_id, nested_parameters=None: runtime.sendEvent(
+    nested_event_id,
+    nested_parameters,
+  )
+
+  result = handler(ctx)
+
+  for name in runtime.variables:
+    if hasattr(ctx, name):
+      runtime.variables[name] = getattr(ctx, name)
+
+  return result
+
+
+def _traceExecutableNames(runtime: HsmRuntime, trace_index: int = -1) -> list[str]:
   trace = runtime.getExecutionLog()[trace_index]
   names: list[str] = []
 
@@ -76,7 +113,7 @@ def test_hsm_play_executes_initialization_to_expected_leaf() -> None:
     "target_state_id": "s11111",
     "target_state_label": "S11111",
   }
-  assert _traceCallableNames(runtime, 0) == [
+  assert _traceExecutableNames(runtime, 0) == [
     "s1_entry",
     "s1_initial",
     "s11_entry",
@@ -112,7 +149,7 @@ def test_hsm_records_representative_transition_trace_sequences() -> None:
   runtime = _build_runtime()
 
   _process_event(runtime, "transition")
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "s1_to_s211",
     "s11111_exit",
     "s1111_exit",
@@ -127,7 +164,7 @@ def test_hsm_records_representative_transition_trace_sequences() -> None:
   ]
 
   _process_event(runtime, "transition")
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "s2111_to_s2112",
     "s2112_entry",
   ]
@@ -147,7 +184,7 @@ def test_hsm_records_representative_transition_trace_sequences() -> None:
       "self_transition": False,
     },
   )
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "guard_choose_transition",
     "guard_false_branch",
     "s41_exit",
@@ -165,7 +202,7 @@ def test_hsm_descendant_to_ancestor_transition_order() -> None:
   _process_event(runtime, "transition")
 
   assert runtime.getState() == {"id": "s2", "label": "S2"}
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "s2112_to_s2",
     "s2112_exit",
     "s211_exit",
@@ -183,7 +220,7 @@ def test_hsm_ancestor_to_descendant_transition_order() -> None:
   _process_event(runtime, "transition")
 
   assert runtime.getState() == {"id": "s21", "label": "S21"}
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "s2_to_s21",
     "s21_entry",
   ]
@@ -198,7 +235,7 @@ def test_hsm_child_to_parent_transition_order() -> None:
   _process_event(runtime, "transition")
 
   assert runtime.getState() == {"id": "s3", "label": "S3"}
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "s31_to_s3",
     "s31_exit",
   ]
@@ -226,7 +263,7 @@ def test_hsm_guard_true_branch_is_real_self_transition() -> None:
     "on_exit",
     "on_entry",
   ]
-  assert _traceCallableNames(runtime) == [
+  assert _traceExecutableNames(runtime) == [
     "guard_choose_transition",
     "guard_true_branch",
     "s41_exit",
@@ -288,7 +325,8 @@ def test_hsm_internal_transition_keeps_active_state_and_receives_parameters(
         "source_state_id": "s41",
         "source_state_label": "S41",
         "activity": {
-          "module": "tests.reference_model.hsm.reference_hsm_callables",
+          "kind": "action_language",
+          "module": "tests.reference_model.hsm.reference_hsm_executables",
           "name": "trace_ping_value",
         },
       },
@@ -308,11 +346,12 @@ def test_hsm_ping_can_bubble_to_s1_from_initial_leaf() -> None:
     "source_state_id": "s1",
     "source_state_label": "S1",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "trace_ping_value",
     },
   }
-  assert _traceCallableNames(runtime) == ["trace_ping_value"]
+  assert _traceExecutableNames(runtime) == ["trace_ping_value"]
 
 
 def test_hsm_set_mode_internal_transition_updates_current_mode() -> None:
@@ -325,7 +364,7 @@ def test_hsm_set_mode_internal_transition_updates_current_mode() -> None:
 
   assert runtime.getState() == {"id": "s41", "label": "S41"}
   assert runtime.getVariable("current_mode") == "forced"
-  assert _traceCallableNames(runtime) == ["apply_target_mode"]
+  assert _traceExecutableNames(runtime) == ["apply_target_mode"]
 
 
 def test_hsm_ping_can_execute_directly_in_s2() -> None:
@@ -346,11 +385,12 @@ def test_hsm_ping_can_execute_directly_in_s2() -> None:
     "source_state_id": "s2",
     "source_state_label": "S2",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "trace_ping_value",
     },
   }
-  assert _traceCallableNames(runtime) == ["trace_ping_value"]
+  assert _traceExecutableNames(runtime) == ["trace_ping_value"]
 
 
 def test_hsm_ping_can_bubble_to_ancestor_and_enqueue_followup_transition() -> None:
@@ -372,7 +412,8 @@ def test_hsm_ping_can_bubble_to_ancestor_and_enqueue_followup_transition() -> No
     "source_state_id": "s211",
     "source_state_label": "S211",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "trace_ping_value",
     },
   }
@@ -381,7 +422,8 @@ def test_hsm_ping_can_bubble_to_ancestor_and_enqueue_followup_transition() -> No
     "source_state_id": "s211",
     "source_state_label": "S211",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "enqueue_transition",
     },
   }
@@ -392,11 +434,12 @@ def test_hsm_ping_can_bubble_to_ancestor_and_enqueue_followup_transition() -> No
     "target_state_id": "s2112",
     "target_state_label": "S2112",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s2111_to_s2112",
     },
   }
-  assert _traceCallableNames(runtime, -2) == ["trace_ping_value", "enqueue_transition"]
+  assert _traceExecutableNames(runtime, -2) == ["trace_ping_value", "enqueue_transition"]
   assert runtime.getEventQueue() == []
 
 
@@ -417,11 +460,12 @@ def test_hsm_ping_can_execute_directly_in_s3() -> None:
     "source_state_id": "s3",
     "source_state_label": "S3",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "trace_ping_value",
     },
   }
-  assert _traceCallableNames(runtime) == ["trace_ping_value"]
+  assert _traceExecutableNames(runtime) == ["trace_ping_value"]
 
 
 def test_hsm_pause_plans_the_next_event_without_executing_it() -> None:
@@ -443,7 +487,8 @@ def test_hsm_pause_plans_the_next_event_without_executing_it() -> None:
     "target_state_id": "s211",
     "target_state_label": "S211",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s1_to_s211",
     },
   }
@@ -470,7 +515,8 @@ def test_hsm_paused_step_keeps_active_state_change_as_explicit_runtime_step() ->
     "source_state_id": "s2111",
     "source_state_label": "S2111",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s2111_entry",
     },
   }
@@ -511,7 +557,8 @@ def test_hsm_paused_step_keeps_active_state_change_as_explicit_runtime_step() ->
     "target_state_id": "s2112",
     "target_state_label": "S2112",
     "activity": {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s2111_to_s2112",
     },
   }

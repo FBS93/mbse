@@ -37,8 +37,6 @@ def test_load_and_validate_hsm_model() -> None:
     "choose_transition",
     "set_mode",
   ]
-  assert model.getVariableDefaultValue("last_ping_value") == 0
-  assert model.getEnumValues("transition_mode") == ["normal", "forced"]
 
 
 def test_hsm_model_exposes_expected_structure_queries() -> None:
@@ -53,7 +51,8 @@ def test_hsm_model_exposes_expected_structure_queries() -> None:
   assert model.getStateInitialTargetId("s4") == "s41"
   assert model.getStateInitialTransitionActivities("s4") == [
     {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s4_initial",
     }
   ]
@@ -120,7 +119,7 @@ def test_hsm_model_exposes_event_parameters() -> None:
   ]
 
 
-def test_hsm_model_allows_missing_optional_enums_and_variables(tmp_path: Path) -> None:
+def test_hsm_model_loads_minimal_valid_payload(tmp_path: Path) -> None:
   model_path = _write_model(
     tmp_path,
     {
@@ -134,37 +133,12 @@ def test_hsm_model_allows_missing_optional_enums_and_variables(tmp_path: Path) -
 
   model = HsmModel.loadAndValidate(model_path)
 
-  assert model.getEnums() == []
-  assert model.getVariables() == []
+  assert model.getEvents() == []
 
 
-def test_hsm_model_exposes_enum_queries() -> None:
+def test_hsm_model_exposes_typed_event_parameters() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
 
-  assert model.getEnums() == [
-    {
-      "id": "transition_mode",
-      "values": ["normal", "forced"],
-    }
-  ]
-  assert model.getEnumById("transition_mode") == {
-    "id": "transition_mode",
-    "values": ["normal", "forced"],
-  }
-  assert model.getEnumValues("transition_mode") == ["normal", "forced"]
-
-
-def test_hsm_model_exposes_typed_variables_and_event_parameters() -> None:
-  model = HsmModel.loadAndValidate(FIXTURE_PATH)
-
-  assert model.getVariableByName("last_ping_value") == {
-    "name": "last_ping_value",
-    "type": "signed",
-    "min": -100,
-    "max": 100,
-    "default_value": 0,
-  }
-  assert model.getVariableDefaultValue("current_mode") == "normal"
   assert model.getEventParameters("choose_transition") == [
     {
       "name": "self_transition",
@@ -185,29 +159,7 @@ def test_hsm_model_exposes_typed_variables_and_event_parameters() -> None:
   }
 
 
-def test_hsm_model_rejects_invalid_typed_variable_and_parameter_shapes(tmp_path: Path) -> None:
-  invalid_variable_path = _write_model(
-    tmp_path,
-    {
-      "schema_version": "mbse-hsm-model-v0",
-      "document_id": "invalid_variable_model",
-      "variables": [
-        {
-          "name": "counter",
-          "type": "unsigned",
-          "min": 0,
-          "max": 10,
-        }
-      ],
-      "events": [],
-      "initial_transition": {"target_id": "idle"},
-      "states": [{"id": "idle", "label": "Idle"}],
-    },
-  )
-
-  with pytest.raises(ValidationError):
-    HsmModel.loadAndValidate(invalid_variable_path)
-
+def test_hsm_model_rejects_invalid_typed_parameter_shapes(tmp_path: Path) -> None:
   invalid_parameter_path = _write_model(
     tmp_path,
     {
@@ -228,12 +180,41 @@ def test_hsm_model_rejects_invalid_typed_variable_and_parameter_shapes(tmp_path:
   with pytest.raises(ValidationError):
     HsmModel.loadAndValidate(invalid_parameter_path)
 
+  invalid_extra_parameter_path = _write_model(
+    tmp_path,
+    {
+      "schema_version": "mbse-hsm-model-v0",
+      "document_id": "invalid_extra_parameter_model",
+      "events": [
+        {
+          "id": "tick",
+          "label": "Tick",
+          "parameters": [
+            {
+              "name": "value",
+              "type": "unsigned",
+              "min": 0,
+              "max": 10,
+              "unexpected": True,
+            }
+          ],
+        }
+      ],
+      "initial_transition": {"target_id": "idle"},
+      "states": [{"id": "idle", "label": "Idle"}],
+    },
+  )
+
+  with pytest.raises(ValidationError):
+    HsmModel.loadAndValidate(invalid_extra_parameter_path)
+
 
 def test_hsm_model_rejects_legacy_on_initial_hook_shape(tmp_path: Path) -> None:
   invalid_model = _load_fixture()
   invalid_model["states"][0]["hooks"]["on_initial"] = [
     {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "legacy_initial",
     }
   ]
@@ -251,7 +232,8 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "ping",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "trace_ping_value",
       }
     ],
@@ -260,7 +242,8 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "ping",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "trace_ping_value",
       }
     ],
@@ -269,7 +252,8 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "ping",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "trace_ping_value",
       }
     ],
@@ -278,11 +262,13 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "ping",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "trace_ping_value",
       },
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "enqueue_transition",
       },
     ],
@@ -291,7 +277,8 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "ping",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "trace_ping_value",
       }
     ],
@@ -300,7 +287,8 @@ def test_hsm_model_exposes_internal_transition_declarations() -> None:
     "event_id": "set_mode",
     "activities": [
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "apply_target_mode",
       }
     ],

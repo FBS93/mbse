@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mbse.local/schema/mbse-context-model-v0",
+  "title": "MBSE context model v0",
+  "description": "MBSE context model v0.",
+  "allOf": [
+    {
+      "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/document"
+    }
+  ],
+  "type": "object",
+  "required": [
+    "enums",
+    "variables"
+  ],
+  "unevaluatedProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "MBSE context model v0.",
+      "const": "mbse-context-model-v0"
+    },
+    "enums": {
+      "description": "Shared reusable enumerations.",
+      "type": "array",
+      "items": {
+        "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/enum"
+      }
+    },
+    "variables": {
+      "description": "Shared typed runtime variables with default values.",
+      "type": "array",
+      "items": {
+        "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/variable"
+      }
+    }
+  }
+}

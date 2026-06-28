@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mbse.local/schema/mbse-activity-model-v0",
+  "title": "MBSE activity model v0",
+  "description": "MBSE activity model v0.",
+  "allOf": [
+    {
+      "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/document"
+    }
+  ],
+  "type": "object",
+  "required": [
+    "initial",
+    "actions",
+    "decisions",
+    "finals"
+  ],
+  "unevaluatedProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "MBSE activity model v0.",
+      "const": "mbse-activity-model-v0"
+    },
+    "initial": {
+      "description": "Required activity entry point.",
+      "$ref": "#/$defs/initial"
+    },
+    "actions": {
+      "description": "Executable action declarations.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "decisions": {
+      "description": "Boolean decision declarations.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision"
+      }
+    },
+    "finals": {
+      "description": "Terminal activity points.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/final"
+      }
+    }
+  },
+  "$defs": {
+    "transition": {
+      "description": "One direct control-flow transition.",
+      "type": "object",
+      "required": ["target_id"],
+      "additionalProperties": false,
+      "properties": {
+        "target_id": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/id"
+        }
+      }
+    },
+    "initial": {
+      "type": "object",
+      "required": ["target_id"],
+      "additionalProperties": false,
+      "properties": {
+        "target_id": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/id"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "label", "executable", "transition"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/id"
+        },
+        "label": {
+          "type": "string"
+        },
+        "executable": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/executable"
+        },
+        "transition": {
+          "$ref": "#/$defs/transition"
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "condition",
+        "true_transition",
+        "false_transition"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/id"
+        },
+        "label": {
+          "type": "string"
+        },
+        "condition": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/executable"
+        },
+        "true_transition": {
+          "$ref": "#/$defs/transition"
+        },
+        "false_transition": {
+          "$ref": "#/$defs/transition"
+        }
+      }
+    },
+    "final": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "https://mbse.local/schema/mbse-model-v0#/$defs/id"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

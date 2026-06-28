@@ -33,12 +33,12 @@ For one chosen external transition branch, execution order is:
 
 ## Guard semantics
 
-- A guard is planned before execution as a pending decision with both branches precomputed.
-- The guard callable is executed only when that pending node is stepped.
+- A guard is planned before execution as a pending guard condition with both branches precomputed.
+- The guard executable is executed only when that pending node is stepped.
 - The execution log stores the resolved boolean result and the chosen target.
-- Guard callables must return `bool`.
+- Guard executables must return `bool`.
 
-## Callable context
+## Executable context
 
 Hooks, activities, and guards receive a mutable context object with:
 
@@ -48,7 +48,9 @@ Hooks, activities, and guards receive a mutable context object with:
 - `event_parameters`
 - `send_event(...)` to enqueue nested events
 
-After each callable returns, any updated variable attributes are persisted back into runtime state.
+After each executable returns, any updated variable attributes are persisted back into runtime state.
+
+HsmRuntime does not resolve executable references itself. It delegates every executable to the upper `Runtime` handler at the exact hook, activity, or guard step where execution is required.
 
 ## State updates and tracing
 

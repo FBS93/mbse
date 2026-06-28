@@ -91,7 +91,7 @@ class HsmRender:
     """Return text fragment ids for one initial-transition activity label."""
 
     return self._requireHighlightIndex().initial_transition_activity_text_ids.get(
-      (edge_id, helpers.callableKey(activity)),
+      (edge_id, helpers.executableKey(activity)),
       (),
     )
 
@@ -187,7 +187,7 @@ class HsmRender:
     """Return text fragment ids for one state-hook activity label."""
 
     return self._requireHighlightIndex().state_hook_activity_text_ids.get(
-      (state_id, section_name, helpers.callableKey(activity)),
+      (state_id, section_name, helpers.executableKey(activity)),
       (),
     )
 
@@ -207,7 +207,7 @@ class HsmRender:
     """Return text fragment ids for one external-transition activity label."""
 
     return self._requireHighlightIndex().external_transition_activity_text_ids.get(
-      (edge_id, helpers.callableKey(activity)),
+      (edge_id, helpers.executableKey(activity)),
       (),
     )
 
@@ -239,7 +239,7 @@ class HsmRender:
     """Return text fragment ids for one internal-transition activity label."""
 
     return self._requireHighlightIndex().internal_transition_activity_text_ids.get(
-      (transition_id, helpers.callableKey(activity)),
+      (transition_id, helpers.executableKey(activity)),
       (),
     )
 
@@ -372,7 +372,7 @@ class HsmRender:
             title_line=types.RenderTextLine(
               fragments=(
                 types.RenderTextFragment(
-                  text=helpers.callableLabel(guard_condition["guard_activity"]),
+                  text=helpers.executableLabel(guard_condition["guard_activity"]),
                   target_payload=f"guard_node_text|{state_id}|{event_id}",
                 ),
               )

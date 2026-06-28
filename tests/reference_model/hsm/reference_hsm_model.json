@@ -1,27 +1,6 @@
 {
   "schema_version": "mbse-hsm-model-v0",
   "document_id": "reference_hsm",
-  "enums": [
-    {
-      "id": "transition_mode",
-      "values": ["normal", "forced"]
-    }
-  ],
-  "variables": [
-    {
-      "name": "last_ping_value",
-      "type": "signed",
-      "min": -100,
-      "max": 100,
-      "default_value": 0
-    },
-    {
-      "name": "current_mode",
-      "type": "enum",
-      "enum_id": "transition_mode",
-      "default_value": "normal"
-    }
-  ],
   "events": [
     {
       "id": "transition",
@@ -69,26 +48,26 @@
       "id": "s1",
       "label": "S1",
       "hooks": {
-        "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1_entry"}],
-        "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1_exit"}]
+        "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1_entry"}],
+        "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1_exit"}]
       },
       "internal_transitions": [
         {
           "event_id": "ping",
           "activities": [
-            {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"}
+            { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"}
           ]
         }
       ],
       "initial_transition": {
         "target_id": "s11",
-        "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1_initial"}]
+        "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1_initial"}]
       },
       "external_transitions": [
         {
           "event_id": "transition",
           "target_id": "s211",
-          "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1_to_s211"}]
+          "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1_to_s211"}]
         }
       ],
       "states": [
@@ -96,44 +75,44 @@
           "id": "s11",
           "label": "S11",
           "hooks": {
-            "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s11_entry"}],
-            "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s11_exit"}]
+            "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s11_entry"}],
+            "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s11_exit"}]
           },
           "initial_transition": {
             "target_id": "s111",
-            "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s11_initial"}]
+            "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s11_initial"}]
           },
           "states": [
             {
               "id": "s111",
               "label": "S111",
               "hooks": {
-                "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s111_entry"}],
-                "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s111_exit"}]
+                "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s111_entry"}],
+                "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s111_exit"}]
               },
               "initial_transition": {
                 "target_id": "s1111",
-                "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s111_initial"}]
+                "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s111_initial"}]
               },
               "states": [
                 {
                   "id": "s1111",
                   "label": "S1111",
                   "hooks": {
-                    "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1111_entry"}],
-                    "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1111_exit"}]
+                    "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1111_entry"}],
+                    "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1111_exit"}]
                   },
                   "initial_transition": {
                     "target_id": "s11111",
-                    "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1111_initial"}]
+                    "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1111_initial"}]
                   },
                   "states": [
                     {
                       "id": "s11111",
                       "label": "S11111",
                       "hooks": {
-                        "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s11111_entry"}],
-                        "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s11111_exit"}]
+                        "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s11111_entry"}],
+                        "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s11111_exit"}]
                       }
                     }
                   ]
@@ -148,14 +127,14 @@
       "id": "s2",
       "label": "S2",
       "hooks": {
-        "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2_entry"}],
-        "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2_exit"}]
+        "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2_entry"}],
+        "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2_exit"}]
       },
       "internal_transitions": [
         {
           "event_id": "ping",
           "activities": [
-            {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"}
+            { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"}
           ]
         }
       ],
@@ -163,7 +142,7 @@
         {
           "event_id": "transition",
           "target_id": "s21",
-          "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2_to_s21"}]
+          "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2_to_s21"}]
         }
       ],
       "states": [
@@ -171,14 +150,14 @@
           "id": "s21",
           "label": "S21",
           "hooks": {
-            "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s21_entry"}],
-            "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s21_exit"}]
+            "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s21_entry"}],
+            "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s21_exit"}]
           },
           "external_transitions": [
             {
               "event_id": "transition",
               "target_id": "s31",
-              "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s21_to_s31"}]
+              "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s21_to_s31"}]
             }
           ],
           "states": [
@@ -186,34 +165,34 @@
               "id": "s211",
               "label": "S211",
               "hooks": {
-                "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s211_entry"}],
-                "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s211_exit"}]
+                "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s211_entry"}],
+                "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s211_exit"}]
               },
               "internal_transitions": [
                 {
                   "event_id": "ping",
                   "activities": [
-                    {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"},
-                    {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "enqueue_transition"}
+                    { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"},
+                    { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "enqueue_transition"}
                   ]
                 }
               ],
               "initial_transition": {
                 "target_id": "s2111",
-                "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s211_initial"}]
+                "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s211_initial"}]
               },
               "states": [
                 {
                   "id": "s2111",
                   "label": "S2111",
                   "hooks": {
-                    "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2111_entry"}]
+                    "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2111_entry"}]
                   },
                   "external_transitions": [
                     {
                       "event_id": "transition",
                       "target_id": "s2112",
-                      "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2111_to_s2112"}]
+                      "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2111_to_s2112"}]
                     }
                   ]
                 },
@@ -221,14 +200,14 @@
                   "id": "s2112",
                   "label": "S2112",
                   "hooks": {
-                    "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2112_entry"}],
-                    "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2112_exit"}]
+                    "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2112_entry"}],
+                    "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2112_exit"}]
                   },
                   "external_transitions": [
                     {
                       "event_id": "transition",
                       "target_id": "s2",
-                      "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s2112_to_s2"}]
+                      "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s2112_to_s2"}]
                     }
                   ]
                 }
@@ -242,14 +221,14 @@
       "id": "s3",
       "label": "S3",
       "hooks": {
-        "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s3_entry"}],
-        "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s3_exit"}]
+        "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s3_entry"}],
+        "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s3_exit"}]
       },
       "internal_transitions": [
         {
           "event_id": "ping",
           "activities": [
-            {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"}
+            { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"}
           ]
         }
       ],
@@ -257,7 +236,7 @@
         {
           "event_id": "transition",
           "target_id": "s311",
-          "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s3_to_s311"}]
+          "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s3_to_s311"}]
         }
       ],
       "states": [
@@ -265,14 +244,14 @@
           "id": "s31",
           "label": "S31",
           "hooks": {
-            "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s31_entry"}],
-            "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s31_exit"}]
+            "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s31_entry"}],
+            "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s31_exit"}]
           },
           "external_transitions": [
             {
               "event_id": "transition",
               "target_id": "s3",
-              "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s31_to_s3"}]
+              "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s31_to_s3"}]
             }
           ],
           "states": [
@@ -280,14 +259,14 @@
               "id": "s311",
               "label": "S311",
               "hooks": {
-                "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s311_entry"}],
-                "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s311_exit"}]
+                "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s311_entry"}],
+                "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s311_exit"}]
               },
               "external_transitions": [
                 {
                   "event_id": "transition",
                   "target_id": "s41",
-                  "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s311_to_s41"}]
+                  "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s311_to_s41"}]
                 }
               ]
             }
@@ -299,32 +278,32 @@
       "id": "s4",
       "label": "S4",
       "hooks": {
-        "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s4_entry"}],
-        "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s4_exit"}]
+        "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s4_entry"}],
+        "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s4_exit"}]
       },
       "initial_transition": {
         "target_id": "s41",
-        "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s4_initial"}]
+        "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s4_initial"}]
       },
       "states": [
         {
           "id": "s41",
           "label": "S41",
           "hooks": {
-            "on_entry": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s41_entry"}],
-            "on_exit": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s41_exit"}]
+            "on_entry": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s41_entry"}],
+            "on_exit": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s41_exit"}]
           },
           "internal_transitions": [
             {
               "event_id": "ping",
               "activities": [
-                {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"}
+                { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"}
               ]
             },
             {
               "event_id": "set_mode",
               "activities": [
-                {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "apply_target_mode"}
+                { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "apply_target_mode"}
               ]
             }
           ],
@@ -332,14 +311,14 @@
             {
               "event_id": "choose_transition",
               "guard_condition": {
-                "guard_activity": {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "guard_choose_transition"},
+                "guard_activity": { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "guard_choose_transition"},
                 "true_branch": {
                   "target_id": "s41",
-                  "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "guard_true_branch"}]
+                  "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "guard_true_branch"}]
                 },
                 "false_branch": {
                   "target_id": "s4",
-                  "activities": [{"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "guard_false_branch"}]
+                  "activities": [{ "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "guard_false_branch"}]
                 }
               }
             }

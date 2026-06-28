@@ -1,0 +1,48 @@
+{
+  "schema_version": "mbse-activity-model-v0",
+  "document_id": "reference_activity",
+  "initial": {
+    "target_id": "check_ready"
+  },
+  "actions": [
+    {
+      "id": "prepare_output",
+      "label": "Prepare Output",
+      "executable": {
+        "kind": "action_language",
+        "module": "tests.reference_model.activity.reference_activity_executables",
+        "name": "prepare_output"
+      },
+      "transition": {
+        "target_id": "done"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "id": "check_ready",
+      "label": "Check Ready",
+      "condition": {
+        "kind": "action_language",
+        "module": "tests.reference_model.activity.reference_activity_executables",
+        "name": "is_ready"
+      },
+      "true_transition": {
+        "target_id": "prepare_output"
+      },
+      "false_transition": {
+        "target_id": "skipped"
+      }
+    }
+  ],
+  "finals": [
+    {
+      "id": "done",
+      "label": "Done"
+    },
+    {
+      "id": "skipped",
+      "label": "Skipped"
+    }
+  ]
+}

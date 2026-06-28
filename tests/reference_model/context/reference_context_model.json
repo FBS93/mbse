@@ -1,0 +1,35 @@
+{
+  "schema_version": "mbse-context-model-v0",
+  "document_id": "reference_context",
+  "enums": [
+    {
+      "id": "transition_mode",
+      "values": ["normal", "forced"]
+    }
+  ],
+  "variables": [
+    {
+      "name": "last_ping_value",
+      "type": "signed",
+      "min": -100,
+      "max": 100,
+      "default_value": 0
+    },
+    {
+      "name": "current_mode",
+      "type": "enum",
+      "enum_id": "transition_mode",
+      "default_value": "normal"
+    },
+    {
+      "name": "is_ready",
+      "type": "bool",
+      "default_value": true
+    },
+    {
+      "name": "output_prepared",
+      "type": "bool",
+      "default_value": false
+    }
+  ]
+}

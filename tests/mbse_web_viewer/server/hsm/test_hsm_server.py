@@ -1,22 +1,114 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib.request import urlopen
 
+from mbse.model.context.context_model import ContextModel
 from mbse.model.hsm.hsm_model import HsmModel
+from mbse.model.project.project_registry import ProjectRegistry
 from mbse_web_viewer.render.hsm.hsm_render import HsmRender
+from mbse_web_viewer.server.hsm.hsm_server import HsmProjectViewerServerController
 from mbse_web_viewer.server.hsm.hsm_server import HsmViewerServerController
+from mbse_web_viewer.server.hsm.hsm_server import startHsmProjectViewerServerFromProjectPath
 from mbse_web_viewer.server.hsm.hsm_server import startHsmViewerServerFromModelPath
 
 
 FIXTURE_PATH = (
   Path(__file__).resolve().parents[3] / "reference_model" / "hsm" / "reference_hsm_model.json"
 )
+CONTEXT_PATH = (
+  Path(__file__).resolve().parents[3]
+  / "reference_model"
+  / "context"
+  / "reference_context_model.json"
+)
+
+
+def _load_context() -> ContextModel:
+  return ContextModel.loadAndValidate(CONTEXT_PATH)
 
 
 def _build_running_controller(model: HsmModel) -> HsmViewerServerController:
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
   controller.play()
   return controller
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> Path:
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_text(json.dumps(payload), encoding="utf-8")
+  return path
+
+
+def _write_multimodel_project(tmp_path: Path) -> Path:
+  project_path = _write_json(
+    tmp_path / "project.json",
+    {
+      "schema_version": "mbse-project-model-v0",
+      "document_id": "viewer_project",
+      "project_root": "models",
+      "entrypoint": "main_hsm",
+    },
+  )
+  _write_json(
+    tmp_path / "models" / "context.json",
+    {
+      "schema_version": "mbse-context-model-v0",
+      "document_id": "shared_context",
+      "enums": [],
+      "variables": [
+        {"name": "output_prepared", "type": "bool", "default_value": False},
+        {"name": "result", "type": "bool", "default_value": False},
+      ],
+    },
+  )
+  _write_json(
+    tmp_path / "models" / "main_hsm.json",
+    {
+      "schema_version": "mbse-hsm-model-v0",
+      "document_id": "main_hsm",
+      "events": [{"id": "go", "label": "Go"}],
+      "initial_transition": {"target_id": "idle"},
+      "states": [
+        {
+          "id": "idle",
+          "label": "Idle",
+          "external_transitions": [
+            {
+              "event_id": "go",
+              "target_id": "done",
+              "activities": [{"kind": "model", "model_id": "child_activity"}],
+            }
+          ],
+        },
+        {"id": "done", "label": "Done"},
+      ],
+    },
+  )
+  _write_json(
+    tmp_path / "models" / "child_activity.json",
+    {
+      "schema_version": "mbse-activity-model-v0",
+      "document_id": "child_activity",
+      "initial": {"target_id": "prepare"},
+      "actions": [
+        {
+          "id": "prepare",
+          "label": "Prepare",
+          "executable": {
+            "kind": "action_language",
+            "module": "tests.reference_model.activity.reference_activity_executables",
+            "name": "prepare_output",
+          },
+          "transition": {"target_id": "done"},
+        }
+      ],
+      "decisions": [],
+      "finals": [{"id": "done", "label": "Done"}],
+    },
+  )
+  return project_path
 
 
 def test_hsm_server_session_exposes_paused_init_preview() -> None:
@@ -24,11 +116,20 @@ def test_hsm_server_session_exposes_paused_init_preview() -> None:
   rendered = HsmRender()
   rendered.render(model)
 
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
   session = controller.getSession()
 
   assert session.document_id == "reference_hsm"
+  assert session.active_model_id == "reference_hsm"
   assert session.svg_url == "/artifacts/diagram.svg"
+  assert session.models == (
+    {
+      "model_id": "reference_hsm",
+      "kind": "hsm",
+      "svg_url": "/artifacts/diagram.svg",
+      "is_entrypoint": True,
+    },
+  )
   assert session.enums == ({"id": "transition_mode", "values": ["normal", "forced"]},)
   assert session.events == (
     {"id": "transition", "label": "Transition"},
@@ -80,10 +181,22 @@ def test_hsm_server_session_exposes_paused_init_preview() -> None:
       "enum_id": "transition_mode",
       "default_value": "normal",
     },
+    {
+      "name": "is_ready",
+      "type": "bool",
+      "default_value": True,
+    },
+    {
+      "name": "output_prepared",
+      "type": "bool",
+      "default_value": False,
+    },
   )
   assert session.variable_values == {
     "last_ping_value": 0,
     "current_mode": "normal",
+    "is_ready": True,
+    "output_prepared": False,
   }
   assert session.debugger == {
     "is_paused": True,
@@ -103,7 +216,8 @@ def test_hsm_server_session_exposes_paused_init_preview() -> None:
       "s1",
       "on_entry",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s1_entry",
       },
     )
@@ -126,11 +240,11 @@ def test_hsm_server_root_initial_active_state_change_applies_on_step() -> None:
   rendered = HsmRender()
   rendered.render(model)
 
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
 
   for _ in range(20):
     session = controller.getSession()
-    next_step = controller._runtime.getNextStep()
+    next_step = controller._getNextStep()
     if (
       next_step is not None
       and next_step["kind"] == "on_entry"
@@ -149,7 +263,8 @@ def test_hsm_server_root_initial_active_state_change_applies_on_step() -> None:
       "s11111",
       "on_entry",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s11111_entry",
       },
     )
@@ -182,7 +297,8 @@ def test_hsm_server_send_event_updates_session_and_transition_highlights() -> No
       "s11111",
       "on_exit",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s11111_exit",
       },
     )
@@ -192,7 +308,8 @@ def test_hsm_server_send_event_updates_session_and_transition_highlights() -> No
       "s2111",
       "on_entry",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s2111_entry",
       },
     )
@@ -228,7 +345,8 @@ def test_hsm_server_highlights_guard_and_branch_texts_for_choose_transition() ->
   branch_activity_text_ids = rendered.getExternalTransitionActivityTextIds(
     branch_edge_id,
     {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "guard_true_branch",
     },
   )
@@ -247,7 +365,7 @@ def test_hsm_server_highlights_guard_and_branch_texts_for_choose_transition() ->
 def test_hsm_server_set_variable_and_reset_refresh_session() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
 
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
   controller.setVariable("current_mode", "forced")
   updated = controller.getSession()
   reset = controller.reset()
@@ -291,7 +409,7 @@ def test_hsm_server_reports_changed_variables_for_visible_flow() -> None:
 
 def test_hsm_server_set_variable_reports_changed_variable() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
 
   changed = controller.setVariable("current_mode", "forced")
 
@@ -327,7 +445,8 @@ def test_hsm_server_paused_step_flow_exposes_debug_state() -> None:
   current_text_ids = rendered.getExternalTransitionActivityTextIds(
     transition_id,
     {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s1_to_s211",
     },
   )
@@ -343,7 +462,8 @@ def test_hsm_server_paused_step_flow_exposes_debug_state() -> None:
     "s11111",
     "on_exit",
     {
-      "module": "tests.reference_model.hsm.reference_hsm_callables",
+      "kind": "action_language",
+      "module": "tests.reference_model.hsm.reference_hsm_executables",
       "name": "s11111_exit",
     },
   )
@@ -383,13 +503,14 @@ def test_hsm_server_step_highlights_guard_branch_immediately_after_guard() -> No
     outcome=True,
     target_state_id="s41",
   )[0]
-  assert controller._runtime.getNextStep()["kind"] == "guard_branch_transition"
+  assert controller._getNextStep()["kind"] == "guard_branch_transition"
   assert session.highlight.current_transition_ids == (branch_edge_id,)
   assert set(
     rendered.getExternalTransitionActivityTextIds(
       branch_edge_id,
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "guard_true_branch",
       },
     )
@@ -465,7 +586,8 @@ def test_hsm_server_step_highlights_hook_section_and_activity_together() -> None
         "s11111",
         "on_exit",
         {
-          "module": "tests.reference_model.hsm.reference_hsm_callables",
+          "kind": "action_language",
+          "module": "tests.reference_model.hsm.reference_hsm_executables",
           "name": "s11111_exit",
         },
       )
@@ -492,7 +614,8 @@ def test_hsm_server_trace_focus_keeps_full_owner_state_for_pending_hook() -> Non
         "s1111",
         "on_exit",
         {
-          "module": "tests.reference_model.hsm.reference_hsm_callables",
+          "kind": "action_language",
+          "module": "tests.reference_model.hsm.reference_hsm_executables",
           "name": "s1111_exit",
         },
       )
@@ -508,7 +631,8 @@ def test_hsm_server_trace_focus_keeps_full_owner_state_for_pending_hook() -> Non
         "s1111",
         "on_entry",
         {
-          "module": "tests.reference_model.hsm.reference_hsm_callables",
+          "kind": "action_language",
+          "module": "tests.reference_model.hsm.reference_hsm_executables",
           "name": "s1111_entry",
         },
       ),
@@ -516,7 +640,8 @@ def test_hsm_server_trace_focus_keeps_full_owner_state_for_pending_hook() -> Non
         "s1111",
         "on_exit",
         {
-          "module": "tests.reference_model.hsm.reference_hsm_callables",
+          "kind": "action_language",
+          "module": "tests.reference_model.hsm.reference_hsm_executables",
           "name": "s1111_exit",
         },
       ),
@@ -559,7 +684,7 @@ def test_hsm_server_paused_queue_exposes_boundary_then_next_event_step() -> None
 
   while True:
     session = controller.getSession()
-    next_step = controller._runtime.getNextStep()
+    next_step = controller._getNextStep()
     if (
       next_step is not None
       and next_step["kind"] == "on_entry"
@@ -576,7 +701,8 @@ def test_hsm_server_paused_queue_exposes_boundary_then_next_event_step() -> None
       "s2111",
       "on_entry",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s2111_entry",
       },
     )
@@ -605,7 +731,8 @@ def test_hsm_server_paused_queue_exposes_boundary_then_next_event_step() -> None
     rendered.getExternalTransitionActivityTextIds(
       next_transition_id,
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s2111_to_s2112",
       },
     )
@@ -633,9 +760,9 @@ def test_hsm_server_focus_related_ids_include_current_highlights() -> None:
 
 def test_hsm_server_exposes_and_toggles_breakpoint_targets() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
   breakpoint_id = (
-    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_callables.s2111_entry"
+    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_executables.s2111_entry"
   )
 
   session = controller.getSession()
@@ -659,7 +786,7 @@ def test_hsm_server_play_stops_before_active_breakpoint() -> None:
   rendered.render(model)
   controller = _build_running_controller(model)
   breakpoint_id = (
-    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_callables.s2111_entry"
+    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_executables.s2111_entry"
   )
   controller.toggleBreakpoint(breakpoint_id)
 
@@ -673,7 +800,8 @@ def test_hsm_server_play_stops_before_active_breakpoint() -> None:
       "s2111",
       "on_entry",
       {
-        "module": "tests.reference_model.hsm.reference_hsm_callables",
+        "kind": "action_language",
+        "module": "tests.reference_model.hsm.reference_hsm_executables",
         "name": "s2111_entry",
       },
     )
@@ -690,7 +818,7 @@ def test_hsm_server_disabled_breakpoint_does_not_stop_play() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
   controller = _build_running_controller(model)
   breakpoint_id = (
-    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_callables.s2111_entry"
+    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_executables.s2111_entry"
   )
   controller.toggleBreakpoint(breakpoint_id)
   disabled = controller.setBreakpointEnabled(breakpoint_id, False)
@@ -709,10 +837,10 @@ def test_hsm_server_disabled_breakpoint_does_not_stop_play() -> None:
 
 def test_hsm_server_persists_custom_breakpoint_order() -> None:
   model = HsmModel.loadAndValidate(FIXTURE_PATH)
-  controller = HsmViewerServerController(model)
+  controller = HsmViewerServerController(model, _load_context())
   breakpoint_ids = [
-    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_callables.s2111_entry",
-    "on_exit|s11111|tests.reference_model.hsm.reference_hsm_callables.s11111_exit",
+    "on_entry|s2111|tests.reference_model.hsm.reference_hsm_executables.s2111_entry",
+    "on_exit|s11111|tests.reference_model.hsm.reference_hsm_executables.s11111_exit",
     "change_active_state|s41",
   ]
 
@@ -737,7 +865,7 @@ def test_hsm_server_persists_custom_breakpoint_order() -> None:
   ] == reordered_ids
 
   appended = controller.toggleBreakpoint(
-    "on_entry|s1|tests.reference_model.hsm.reference_hsm_callables.s1_entry"
+    "on_entry|s1|tests.reference_model.hsm.reference_hsm_executables.s1_entry"
   )
 
   assert [
@@ -746,7 +874,7 @@ def test_hsm_server_persists_custom_breakpoint_order() -> None:
     if target.is_set
   ] == [
     *reordered_ids,
-    "on_entry|s1|tests.reference_model.hsm.reference_hsm_callables.s1_entry",
+    "on_entry|s1|tests.reference_model.hsm.reference_hsm_executables.s1_entry",
   ]
 
 
@@ -769,6 +897,39 @@ def test_hsm_server_step_and_play_match_final_trace_focus() -> None:
   assert play_session.focus.trace_related_ids == step_session.focus.trace_related_ids
 
 
+def test_hsm_project_server_executes_model_activity_and_serves_model_svgs(
+  tmp_path: Path,
+) -> None:
+  project_path = _write_multimodel_project(tmp_path)
+  controller = HsmProjectViewerServerController(ProjectRegistry.load(project_path))
+
+  assert "id=\"state_idle\"" in controller.getModelSvgText("main_hsm")
+  assert "id=\"action_prepare\"" in controller.getModelSvgText("child_activity")
+
+  controller.play()
+  session = controller.sendEvent("go")
+
+  assert session.document_id == "main_hsm"
+  assert session.active_model_id == "main_hsm"
+  assert session.models == (
+    {
+      "model_id": "child_activity",
+      "kind": "activity",
+      "svg_url": "/artifacts/models/child_activity/diagram.svg",
+      "is_entrypoint": False,
+    },
+    {
+      "model_id": "main_hsm",
+      "kind": "hsm",
+      "svg_url": "/artifacts/models/main_hsm/diagram.svg",
+      "is_entrypoint": True,
+    },
+  )
+  assert session.variable_values["output_prepared"] is True
+  assert session.state == {"id": "done", "label": "Done"}
+  assert all("event" in trace for trace in session.execution_log)
+
+
 def _highlightIds(session) -> set[str]:
   return (
     set(session.highlight.state_ids)
@@ -780,9 +941,49 @@ def _highlightIds(session) -> set[str]:
 
 
 def test_hsm_server_can_start_from_model_path() -> None:
-  server = startHsmViewerServerFromModelPath(FIXTURE_PATH)
+  server = startHsmViewerServerFromModelPath(FIXTURE_PATH, context_path=CONTEXT_PATH)
 
   try:
     assert server.base_url.startswith("http://127.0.0.1:")
+  finally:
+    server.close()
+
+
+def test_hsm_server_serves_static_module_assets() -> None:
+  server = startHsmViewerServerFromModelPath(FIXTURE_PATH, context_path=CONTEXT_PATH)
+
+  try:
+    with urlopen(f"{server.base_url}/") as response:
+      index_text = response.read().decode("utf-8")
+    with urlopen(f"{server.base_url}/viewer.js") as response:
+      viewer_text = response.read().decode("utf-8")
+    with urlopen(f"{server.base_url}/viewer_api.js") as response:
+      api_text = response.read().decode("utf-8")
+    with urlopen(f"{server.base_url}/viewer_viewport.js") as response:
+      viewport_text = response.read().decode("utf-8")
+
+    assert 'type="module" src="/viewer.js"' in index_text
+    assert 'id="model-select"' in index_text
+    assert 'from "./viewer_api.js"' in viewer_text
+    assert 'from "./viewer_viewport.js"' in viewer_text
+    assert "function renderModelOptions" in viewer_text
+    assert "export async function fetchJson" in api_text
+    assert "export function applyZoom" in viewport_text
+  finally:
+    server.close()
+
+
+def test_hsm_project_server_serves_model_svg_artifacts(tmp_path: Path) -> None:
+  project_path = _write_multimodel_project(tmp_path)
+  server = startHsmProjectViewerServerFromProjectPath(project_path)
+
+  try:
+    with urlopen(f"{server.base_url}/artifacts/models/main_hsm/diagram.svg") as response:
+      hsm_svg = response.read().decode("utf-8")
+    with urlopen(f"{server.base_url}/artifacts/models/child_activity/diagram.svg") as response:
+      activity_svg = response.read().decode("utf-8")
+
+    assert "id=\"state_idle\"" in hsm_svg
+    assert "id=\"action_prepare\"" in activity_svg
   finally:
     server.close()

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator
+from mbse.model.mbse_model import MbseModel
 
 
 _HSM_MODEL_SCHEMA_PATH = Path(__file__).with_name("hsm_model.json")
@@ -81,85 +80,10 @@ class HsmStateRelatedElements:
   guarded_transition_branches: tuple[HsmGuardedTransitionBranchRelation, ...]
 
 
-class HsmModel:
+class HsmModel(MbseModel):
   """Authored HSM model plus read-only structural queries."""
 
-  def __init__(self, model: dict[str, Any]) -> None:
-    """HsmModel initialization."""
-
-    self.document = model
-
-  @classmethod
-  def load(cls, modelPath: str | Path) -> HsmModel:
-    """Load an HSM model JSON file."""
-
-    with Path(modelPath).open("r", encoding="utf-8") as modelFile:
-      return cls(json.load(modelFile))
-
-  @staticmethod
-  def validate(model: dict[str, Any]) -> None:
-    """Validate an HSM model dictionary against the JSON Schema."""
-
-    with _HSM_MODEL_SCHEMA_PATH.open("r", encoding="utf-8") as schemaFile:
-      schema = json.load(schemaFile)
-
-    Draft202012Validator(schema).validate(model)
-
-  @classmethod
-  def loadAndValidate(cls, modelPath: str | Path) -> HsmModel:
-    """Load and validate an HSM model JSON file."""
-
-    model = cls.load(modelPath)
-    cls.validate(model.document)
-    return model
-
-  def getDocumentId(self) -> str:
-    """Return the authored document id."""
-
-    return self.document["document_id"]
-
-  def getSchemaVersion(self) -> str:
-    """Return the authored schema version."""
-
-    return self.document["schema_version"]
-
-  def getEnums(self) -> list[dict[str, Any]]:
-    """Return the authored global enum declarations."""
-
-    return self.document.get("enums", [])
-
-  def getEnumById(self, enum_id: str) -> dict[str, Any]:
-    """Return one global enum declaration by id."""
-
-    for enum in self.getEnums():
-      if enum["id"] == enum_id:
-        return enum
-
-    raise KeyError(f"Unknown enum_id '{enum_id}'.")
-
-  def getEnumValues(self, enum_id: str) -> list[str]:
-    """Return the declared values for one global enum."""
-
-    return self.getEnumById(enum_id)["values"]
-
-  def getVariables(self) -> list[dict[str, Any]]:
-    """Return the authored variable declarations."""
-
-    return self.document.get("variables", [])
-
-  def getVariableByName(self, name: str) -> dict[str, Any]:
-    """Return one variable declaration by name."""
-
-    for variable in self.getVariables():
-      if variable["name"] == name:
-        return variable
-
-    raise KeyError(f"Unknown variable name '{name}'.")
-
-  def getVariableDefaultValue(self, name: str) -> Any:
-    """Return the authored default value for one variable."""
-
-    return self.getVariableByName(name)["default_value"]
+  _SCHEMA_PATH = _HSM_MODEL_SCHEMA_PATH
 
   def getEvents(self) -> list[dict[str, Any]]:
     """Return the authored event declarations."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 from mbse.model.hsm.hsm_model import HsmModel
@@ -54,14 +55,14 @@ def test_hsm_svg_exposes_state_hook_and_transition_text_targets() -> None:
   )
   assert rendered.getInitialTransitionActivityTextIds(
     rendered.getInitialTransitionId("s4"),
-    {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s4_initial"},
+    { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s4_initial"},
   )
   assert rendered.getExternalTransitionLabelTextIds(
     "external_transition_s1_transition_to_s211"
   )
   assert rendered.getExternalTransitionActivityTextIds(
     "external_transition_s1_transition_to_s211",
-    {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "s1_to_s211"},
+    { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "s1_to_s211"},
   )
 
 
@@ -92,5 +93,22 @@ def test_hsm_svg_exposes_internal_transition_highlight_mapping() -> None:
   )
   assert rendered.getInternalTransitionActivityTextIds(
     "internal_transition_s41_ping",
-    {"module": "tests.reference_model.hsm.reference_hsm_callables", "name": "trace_ping_value"},
+    { "kind": "action_language", "module": "tests.reference_model.hsm.reference_hsm_executables", "name": "trace_ping_value"},
+  )
+
+
+def test_hsm_svg_exposes_model_executable_text_targets() -> None:
+  model = HsmModel.loadAndValidate(FIXTURE_PATH)
+  document = deepcopy(model.document)
+  document["states"][0]["initial_transition"]["activities"] = [
+    {"kind": "model", "model_id": "child_activity"}
+  ]
+  model = HsmModel(document)
+
+  rendered = HsmRender()
+  rendered.render(model)
+
+  assert rendered.getInitialTransitionActivityTextIds(
+    rendered.getInitialTransitionId("s1"),
+    {"kind": "model", "model_id": "child_activity"},
   )

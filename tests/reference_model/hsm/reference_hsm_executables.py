@@ -7,7 +7,7 @@ def _noop(ctx) -> None:
 
 # These reference-model hooks and activities stay as explicit no-ops because the
 # runtime tests validate planning and activation order in execution_log, not the
-# internal business logic of each callable body.
+# internal business logic of each executable body.
 s1_entry = _noop
 s1_initial = _noop
 s1_exit = _noop

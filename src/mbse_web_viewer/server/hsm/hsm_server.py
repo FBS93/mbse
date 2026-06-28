@@ -4,24 +4,17 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from dataclasses import asdict
-from dataclasses import dataclass
-from functools import partial
-from http.server import BaseHTTPRequestHandler
-from http.server import ThreadingHTTPServer
-import json
-from json import JSONDecodeError
-import mimetypes
 from pathlib import Path
-from threading import Thread
 from typing import Any
-from urllib.parse import urlparse
 import webbrowser
 
+from mbse.model.context.context_model import ContextModel
+from mbse.model.activity.activity_model import ActivityModel
 from mbse.model.hsm.hsm_model import HsmExternalTransitionRelation
 from mbse.model.hsm.hsm_model import HsmGuardedTransitionBranchRelation
 from mbse.model.hsm.hsm_model import HsmModel
 from mbse.model.hsm.hsm_model import HsmRelatedState
+from mbse.model.project.project_registry import ProjectRegistry
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeExternalTransition
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeGuardBranchTransition
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeGuardCondition
@@ -29,106 +22,28 @@ from mbse.runtime.hsm.hsm_runtime import HsmRuntimeInitialTransition
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeInternalTransition
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeOnEntry
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeOnExit
-from mbse.runtime.hsm.hsm_runtime import HsmRuntime
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimePendingExecutionTypeAlias
 from mbse.runtime.hsm.hsm_runtime import HsmRuntimeTrace
+from mbse.runtime.runtime import Runtime
+from mbse_web_viewer.render.activity.activity_render import ActivityRender
 from mbse_web_viewer.render.hsm.hsm_render import HsmRender
-
-
-_STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
-
-
-@dataclass(frozen=True)
-class HsmViewerHighlight:
-  """Resolved SVG ids to highlight for the current viewer session."""
-
-  state_ids: tuple[str, ...]
-  transition_ids: tuple[str, ...]
-  text_ids: tuple[str, ...]
-  current_transition_ids: tuple[str, ...]
-  current_text_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class HsmViewerTrace:
-  """Serialized view of the latest runtime trace."""
-
-  event_id: str | None
-  entries: list[dict[str, object]]
-
-
-@dataclass(frozen=True)
-class HsmViewerBreakpointTarget:
-  """One semantic debugger breakpoint target resolved to SVG ids."""
-
-  id: str
-  label: str
-  svg_ids: tuple[str, ...]
-  text_ids: tuple[str, ...]
-  is_set: bool
-  enabled: bool
-
-
-@dataclass(frozen=True)
-class HsmViewerFocus:
-  """Resolved focus contexts for state-centric and trace-centric viewer modes."""
-
-  state_related_ids: tuple[str, ...]
-  trace_related_ids: tuple[str, ...]
-  state_viewport_focus_ids: tuple[str, ...]
-  trace_viewport_focus_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class HsmViewerSession:
-  """Full JSON session served to the browser viewer."""
-
-  document_id: str
-  svg_url: str
-  enums: tuple[dict[str, object], ...]
-  events: tuple[dict[str, object], ...]
-  variables: tuple[dict[str, object], ...]
-  state: dict[str, str | None]
-  variable_values: dict[str, Any]
-  changed_variable_ids: tuple[str, ...]
-  execution_log: list[dict[str, object]]
-  debugger: dict[str, object]
-  highlight: HsmViewerHighlight
-  focus: HsmViewerFocus
-  last_trace: HsmViewerTrace
-  breakpoints: tuple[HsmViewerBreakpointTarget, ...]
-
-
-class RunningHsmViewerServer:
-  """Running HTTP server handle for one HSM viewer instance."""
-
-  def __init__(self, httpd: ThreadingHTTPServer, thread: Thread) -> None:
-    """Wrap one started HTTP server and its serving thread."""
-
-    self._httpd = httpd
-    self._thread = thread
-    self.base_url = f"http://{httpd.server_address[0]}:{httpd.server_address[1]}"
-
-  def waitUntilStopped(self) -> None:
-    """Block until the serving thread stops."""
-
-    self._thread.join()
-
-  def close(self) -> None:
-    """Stop the HTTP server and wait briefly for shutdown."""
-
-    self._httpd.shutdown()
-    self._httpd.server_close()
-    self._thread.join(timeout=5)
+from mbse_web_viewer.server.session import ViewerBreakpointTarget
+from mbse_web_viewer.server.session import ViewerFocus
+from mbse_web_viewer.server.session import ViewerHighlight
+from mbse_web_viewer.server.session import ViewerSession
+from mbse_web_viewer.server.session import ViewerTrace
+from mbse_web_viewer.server.server import RunningViewerServer
+from mbse_web_viewer.server.server import startViewerServer
 
 
 class HsmViewerServerController:
   """Own the rendered SVG, runtime instance, and derived viewer session."""
 
-  def __init__(self, model: HsmModel) -> None:
+  def __init__(self, model: HsmModel, context: ContextModel | None = None) -> None:
     """Initialize the controller from one validated HSM model."""
 
     self._model = model
+    self._context = context
     self._rendered_svg = HsmRender()
     self._rendered_svg.render(model)
     self._breakpoint_enabled_by_id: dict[str, bool] = {}
@@ -145,19 +60,45 @@ class HsmViewerServerController:
 
     return self._rendered_svg.getSvgText()
 
-  def getSession(self) -> HsmViewerSession:
+  def getModelSvgText(self, model_id: str) -> str:
+    """Return the rendered SVG document for one model id."""
+
+    if model_id != self._model.getDocumentId():
+      raise KeyError(f"Unknown model_id '{model_id}'.")
+    return self.getSvgText()
+
+  def _getViewerModels(self) -> tuple[dict[str, object], ...]:
+    """Return models available to the current viewer session."""
+
+    return (
+      {
+        "model_id": self._model.getDocumentId(),
+        "kind": "hsm",
+        "svg_url": "/artifacts/diagram.svg",
+        "is_entrypoint": True,
+      },
+    )
+
+  def _getActiveModelId(self) -> str:
+    """Return the model id currently emphasized by this controller."""
+
+    return self._model.getDocumentId()
+
+  def getSession(self) -> ViewerSession:
     """Return the current serialized browser session."""
 
-    return HsmViewerSession(
+    return ViewerSession(
       document_id=self._model.getDocumentId(),
+      active_model_id=self._getActiveModelId(),
       svg_url="/artifacts/diagram.svg",
-      enums=tuple(dict(enum) for enum in self._model.getEnums()),
+      models=self._getViewerModels(),
+      enums=tuple(dict(enum) for enum in self._getContextEnums()),
       events=tuple(dict(event) for event in self._model.getEvents()),
-      variables=tuple(dict(variable) for variable in self._model.getVariables()),
+      variables=tuple(dict(variable) for variable in self._getContextVariables()),
       state=self._runtime.getState(),
       variable_values={
         variable["name"]: self._runtime.getVariable(variable["name"])
-        for variable in self._model.getVariables()
+        for variable in self._getContextVariables()
       },
       changed_variable_ids=self._changed_variable_ids,
       execution_log=self._serializeExecutionLog(),
@@ -168,7 +109,7 @@ class HsmViewerServerController:
       breakpoints=self._serializeBreakpoints(),
     )
 
-  def reset(self) -> HsmViewerSession:
+  def reset(self) -> ViewerSession:
     """Reset the runtime and return the refreshed browser session."""
 
     self._runtime = self._buildRuntime()
@@ -181,7 +122,7 @@ class HsmViewerServerController:
     self,
     event_id: str,
     parameters: dict[str, Any] | None = None,
-  ) -> HsmViewerSession:
+  ) -> ViewerSession:
     """Send one runtime event and return the refreshed browser session."""
 
     self._requireDeclaredEventId(event_id)
@@ -200,7 +141,7 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def play(self) -> HsmViewerSession:
+  def play(self) -> ViewerSession:
     """Run the runtime until the current pending work and queue are drained."""
 
     initial_variable_values = self._snapshotVariableValues()
@@ -212,14 +153,14 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def pause(self) -> HsmViewerSession:
+  def pause(self) -> ViewerSession:
     """Pause future automatic execution and return the refreshed session."""
 
     self._runtime.pause()
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def stepExecution(self) -> HsmViewerSession:
+  def stepExecution(self) -> ViewerSession:
     """Advance the runtime to the next debugger step."""
 
     initial_variable_values = self._snapshotVariableValues()
@@ -229,7 +170,7 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def setVariable(self, variable_id: str, value: Any) -> HsmViewerSession:
+  def setVariable(self, variable_id: str, value: Any) -> ViewerSession:
     """Set one runtime variable and return the refreshed browser session."""
 
     self._requireDeclaredVariableId(variable_id)
@@ -239,7 +180,7 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def toggleBreakpoint(self, breakpoint_id: str) -> HsmViewerSession:
+  def toggleBreakpoint(self, breakpoint_id: str) -> ViewerSession:
     """Toggle one declared debugger breakpoint target."""
 
     if breakpoint_id not in self._breakpoint_targets:
@@ -257,7 +198,7 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def removeBreakpoint(self, breakpoint_id: str) -> HsmViewerSession:
+  def removeBreakpoint(self, breakpoint_id: str) -> ViewerSession:
     """Remove one set debugger breakpoint."""
 
     if breakpoint_id not in self._breakpoint_targets:
@@ -275,7 +216,7 @@ class HsmViewerServerController:
     self,
     breakpoint_id: str,
     enabled: bool,
-  ) -> HsmViewerSession:
+  ) -> ViewerSession:
     """Enable or disable one existing debugger breakpoint."""
 
     if breakpoint_id not in self._breakpoint_targets:
@@ -286,7 +227,7 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def reorderBreakpoints(self, breakpoint_ids: list[str]) -> HsmViewerSession:
+  def reorderBreakpoints(self, breakpoint_ids: list[str]) -> ViewerSession:
     """Persist one explicit order for the currently set debugger breakpoints."""
 
     ordered_breakpoint_ids: list[str] = []
@@ -311,19 +252,49 @@ class HsmViewerServerController:
     self._last_highlight = self._buildCurrentTraceHighlight()
     return self.getSession()
 
-  def _buildRuntime(self) -> HsmRuntime:
+  def _buildRuntime(self) -> Runtime:
     """Create and initialize one fresh runtime from the current model."""
 
-    runtime = HsmRuntime()
-    runtime.init(self._model)
+    runtime = Runtime()
+    runtime.initModel(self._model, self._context)
     return runtime
+
+  def _getNextStep(self) -> HsmRuntimePendingExecutionTypeAlias | None:
+    """Return the native pending HSM step from the top-level runtime."""
+
+    wrapped_step = self._runtime.getNextStep()
+    if wrapped_step is None:
+      return None
+    return wrapped_step["step"]
+
+  def _getExecutionLog(self) -> list[HsmRuntimeTrace]:
+    """Return native HSM traces from the top-level runtime."""
+
+    return [
+      wrapped_trace["trace"]
+      for wrapped_trace in self._runtime.getExecutionLog()
+      if (
+        wrapped_trace["runtime"] == "hsm"
+        and wrapped_trace["model_id"] == self._model.getDocumentId()
+      )
+    ]
+
+  def _getContextEnums(self) -> list[dict[str, Any]]:
+    """Return context enum declarations available to the viewer."""
+
+    return [] if self._context is None else self._context.getEnums()
+
+  def _getContextVariables(self) -> list[dict[str, Any]]:
+    """Return context variable declarations available to the runtime."""
+
+    return [] if self._context is None else self._context.getVariables()
 
   def _snapshotVariableValues(self) -> dict[str, Any]:
     """Return a detached snapshot of current runtime variable values."""
 
     return {
       variable["name"]: deepcopy(self._runtime.getVariable(variable["name"]))
-      for variable in self._model.getVariables()
+      for variable in self._getContextVariables()
     }
 
   def _diffVariableIds(self, initial_variable_values: dict[str, Any]) -> tuple[str, ...]:
@@ -331,7 +302,7 @@ class HsmViewerServerController:
 
     return tuple(
       variable["name"]
-      for variable in self._model.getVariables()
+      for variable in self._getContextVariables()
       if (
         self._runtime.getVariable(variable["name"])
         != initial_variable_values[variable["name"]]
@@ -341,7 +312,6 @@ class HsmViewerServerController:
   def _playUntilBreakpoint(self) -> None:
     """Run pending work until idle or before the next active breakpoint step."""
 
-    self._runtime.is_paused = False
     skipped_breakpoint_id = self._getPendingBreakpointId()
 
     while True:
@@ -349,10 +319,10 @@ class HsmViewerServerController:
         stop_on_breakpoint=True,
         skipped_breakpoint_id=skipped_breakpoint_id,
       )
-      next_step = self._runtime.getNextStep()
+      next_step = self._getNextStep()
       if next_step is None:
         if not self._runtime.getEventQueue():
-          self._runtime.is_paused = False
+          self._runtime.play()
           return
         self._runtime.step()
         skipped_breakpoint_id = None
@@ -379,7 +349,7 @@ class HsmViewerServerController:
     """Consume pending entries that should be shown only as completed path."""
 
     while True:
-      next_step = self._runtime.getNextStep()
+      next_step = self._getNextStep()
       if next_step is None:
         return
       breakpoint_id = self._breakpointIdForStep(next_step)
@@ -403,7 +373,7 @@ class HsmViewerServerController:
     self,
     step: HsmRuntimePendingExecutionTypeAlias,
   ) -> bool:
-    """Return whether one pending transition has no callable to execute."""
+    """Return whether one pending transition has no executable to execute."""
 
     return (
       step["kind"] in {
@@ -416,14 +386,15 @@ class HsmViewerServerController:
       and step["activity"] is None
     )
 
-  def _serializeLastTrace(self) -> HsmViewerTrace:
+  def _serializeLastTrace(self) -> ViewerTrace:
     """Serialize the latest runtime trace for lightweight browser inspection."""
 
-    if not self._runtime.getExecutionLog():
-      return HsmViewerTrace(event_id=None, entries=[])
+    execution_log = self._getExecutionLog()
+    if not execution_log:
+      return ViewerTrace(event_id=None, entries=[])
 
-    trace = self._runtime.getExecutionLog()[-1]
-    return HsmViewerTrace(
+    trace = execution_log[-1]
+    return ViewerTrace(
       event_id=trace["event"]["event_id"],
       entries=[dict(entry) for entry in trace["entries"]],
     )
@@ -436,7 +407,7 @@ class HsmViewerServerController:
         "event": dict(trace["event"]),
         "entries": [dict(entry) for entry in trace["entries"]],
       }
-      for trace in self._runtime.getExecutionLog()
+      for trace in self._getExecutionLog()
     ]
 
   def _serializeDebuggerState(self) -> dict[str, object]:
@@ -445,11 +416,12 @@ class HsmViewerServerController:
     queued_events = [dict(event) for event in self._runtime.getEventQueue()]
     has_pending_execution = self._runtime.hasPendingExecution()
     current_event = None
-    if has_pending_execution and self._runtime.getExecutionLog():
-      current_event = dict(self._runtime.getExecutionLog()[-1]["event"])
+    execution_log = self._getExecutionLog()
+    if has_pending_execution and execution_log:
+      current_event = dict(execution_log[-1]["event"])
     elif queued_events:
       current_event = dict(queued_events[0])
-    completed_traces = self._runtime.getExecutionLog()
+    completed_traces = execution_log
     if has_pending_execution and completed_traces:
       completed_traces = completed_traces[:-1]
     return {
@@ -465,11 +437,11 @@ class HsmViewerServerController:
       "can_step": has_pending_execution or bool(queued_events),
     }
 
-  def _serializeBreakpoints(self) -> tuple[HsmViewerBreakpointTarget, ...]:
+  def _serializeBreakpoints(self) -> tuple[ViewerBreakpointTarget, ...]:
     """Serialize all available breakpoint targets with current active state."""
 
     return tuple(
-      HsmViewerBreakpointTarget(
+      ViewerBreakpointTarget(
         id=target.id,
         label=target.label,
         svg_ids=target.svg_ids,
@@ -518,10 +490,10 @@ class HsmViewerServerController:
 
     return self._breakpoint_enabled_by_id.get(breakpoint_id, False)
 
-  def _buildBreakpointTargets(self) -> dict[str, HsmViewerBreakpointTarget]:
+  def _buildBreakpointTargets(self) -> dict[str, ViewerBreakpointTarget]:
     """Build semantic debugger breakpoint targets backed by rendered SVG text ids."""
 
-    targets: dict[str, HsmViewerBreakpointTarget] = {}
+    targets: dict[str, ViewerBreakpointTarget] = {}
     for state in self._model.iterStates():
       state_id = state["id"]
       self._addBreakpointTarget(
@@ -537,13 +509,13 @@ class HsmViewerServerController:
         ("on_exit", self._model.getStateOnExit(state_id)),
       ):
         for activity in activities:
-          activity_key = self._callableKey(activity)
+          activity_key = self._executableKey(activity)
           self._addBreakpointTarget(
             targets,
             breakpoint_id=self._breakpointKey(section_name, state_id, activity_key),
             label=(
               f"{self._formatHookName(section_name)}: "
-              f"{self._model.getStateLabel(state_id)} / {activity['name']}"
+              f"{self._model.getStateLabel(state_id)} / {self._executableLabel(activity)}"
             ),
             svg_ids=(self._rendered_svg.getStateId(state_id),),
             text_ids=self._rendered_svg.getStateHookActivityTextIds(
@@ -556,7 +528,7 @@ class HsmViewerServerController:
       for transition in self._model.getStateInternalTransitions(state_id):
         event_id = transition["event_id"]
         for activity in transition.get("activities", []):
-          activity_key = self._callableKey(activity)
+          activity_key = self._executableKey(activity)
           transition_ids = self._rendered_svg.getInternalTransitionIds(state_id, event_id)
           text_ids: list[str] = []
           for transition_id in transition_ids:
@@ -576,7 +548,7 @@ class HsmViewerServerController:
             ),
             label=(
               "Internal transition: "
-              f"{self._model.getStateLabel(state_id)} / {event_id} / {activity['name']}"
+              f"{self._model.getStateLabel(state_id)} / {event_id} / {self._executableLabel(activity)}"
             ),
             svg_ids=transition_ids,
             text_ids=tuple(text_ids),
@@ -586,7 +558,7 @@ class HsmViewerServerController:
         target_state_id = self._model.getStateInitialTargetId(state_id)
         transition_id = self._rendered_svg.getInitialTransitionId(state_id)
         for activity in self._model.getStateInitialTransitionActivities(state_id):
-          activity_key = self._callableKey(activity)
+          activity_key = self._executableKey(activity)
           self._addBreakpointTarget(
             targets,
             breakpoint_id=self._breakpointKey(
@@ -598,7 +570,7 @@ class HsmViewerServerController:
             label=(
               "Initial transition: "
               f"{self._model.getStateLabel(state_id)} -> "
-              f"{self._model.getStateLabel(target_state_id)} / {activity['name']}"
+              f"{self._model.getStateLabel(target_state_id)} / {self._executableLabel(activity)}"
             ),
             svg_ids=(transition_id,),
             text_ids=self._rendered_svg.getInitialTransitionActivityTextIds(
@@ -614,7 +586,7 @@ class HsmViewerServerController:
 
   def _appendExternalBreakpointTargets(
     self,
-    targets: dict[str, HsmViewerBreakpointTarget],
+    targets: dict[str, ViewerBreakpointTarget],
     state_id: str,
     transition: dict[str, Any],
   ) -> None:
@@ -642,13 +614,13 @@ class HsmViewerServerController:
       return
 
     guard_activity = guard_condition["guard_activity"]
-    guard_activity_key = self._callableKey(guard_activity)
+    guard_activity_key = self._executableKey(guard_activity)
     self._addBreakpointTarget(
       targets,
       breakpoint_id=self._breakpointKey("guard_condition", state_id, event_id, guard_activity_key),
       label=(
         "Guard: "
-        f"{self._model.getStateLabel(state_id)} / {event_id} / {guard_activity['name']}"
+        f"{self._model.getStateLabel(state_id)} / {event_id} / {self._executableLabel(guard_activity)}"
       ),
       svg_ids=self._rendered_svg.getGuardNodeIds(state_id, event_id),
       text_ids=self._rendered_svg.getGuardNodeTextIds(state_id, event_id),
@@ -676,7 +648,7 @@ class HsmViewerServerController:
         target_state_id=target_state_id,
       )
       for activity in branch.get("activities", []):
-        activity_key = self._callableKey(activity)
+        activity_key = self._executableKey(activity)
         text_ids: list[str] = []
         for branch_id in branch_ids:
           text_ids.extend(
@@ -698,7 +670,7 @@ class HsmViewerServerController:
           label=(
             "Guard branch: "
             f"{event_id} {'true' if result else 'false'} -> "
-            f"{self._model.getStateLabel(target_state_id)} / {activity['name']}"
+            f"{self._model.getStateLabel(target_state_id)} / {self._executableLabel(activity)}"
           ),
           svg_ids=branch_ids,
           text_ids=tuple(text_ids),
@@ -706,7 +678,7 @@ class HsmViewerServerController:
 
   def _addTransitionActivityBreakpointTarget(
     self,
-    targets: dict[str, HsmViewerBreakpointTarget],
+    targets: dict[str, ViewerBreakpointTarget],
     *,
     kind: str,
     state_id: str,
@@ -717,7 +689,7 @@ class HsmViewerServerController:
   ) -> None:
     """Append one external-transition activity breakpoint target."""
 
-    activity_key = self._callableKey(activity)
+    activity_key = self._executableKey(activity)
     target_label = (
       "guard"
       if target_state_id == "guard"
@@ -743,7 +715,7 @@ class HsmViewerServerController:
       label=(
         "Transition: "
         f"{self._model.getStateLabel(state_id)} --{event_id}--> "
-        f"{target_label} / {activity['name']}"
+        f"{target_label} / {self._executableLabel(activity)}"
       ),
       svg_ids=transition_ids,
       text_ids=tuple(text_ids),
@@ -751,7 +723,7 @@ class HsmViewerServerController:
 
   def _addBreakpointTarget(
     self,
-    targets: dict[str, HsmViewerBreakpointTarget],
+    targets: dict[str, ViewerBreakpointTarget],
     *,
     breakpoint_id: str,
     label: str,
@@ -762,7 +734,7 @@ class HsmViewerServerController:
 
     if not text_ids:
       return
-    targets[breakpoint_id] = HsmViewerBreakpointTarget(
+    targets[breakpoint_id] = ViewerBreakpointTarget(
       id=breakpoint_id,
       label=label,
       svg_ids=svg_ids,
@@ -771,16 +743,16 @@ class HsmViewerServerController:
       enabled=self._isBreakpointEnabled(breakpoint_id),
     )
 
-  def _buildCurrentTraceHighlight(self) -> HsmViewerHighlight:
+  def _buildCurrentTraceHighlight(self) -> ViewerHighlight:
     """Resolve the latest runtime trace into SVG ids for highlighting."""
 
-    trace = self._runtime.getExecutionLog()[-1]
+    trace = self._getExecutionLog()[-1]
     state_ids = self._buildStateHighlightIds()
     transition_ids = list(self._buildTraceTransitionIds(trace))
     text_ids = list(self._buildTraceTextIds(trace, transition_ids))
     current_transition_ids: tuple[str, ...] = ()
     current_text_ids: tuple[str, ...] = ()
-    next_step = self._runtime.getNextStep()
+    next_step = self._getNextStep()
     if next_step is not None:
       if next_step["kind"] == "change_active_state":
         current_transition_ids = (
@@ -791,7 +763,7 @@ class HsmViewerServerController:
         )
       else:
         current_transition_ids, current_text_ids = self._buildCurrentEntryHighlightIds(next_step)
-    return HsmViewerHighlight(
+    return ViewerHighlight(
       state_ids=state_ids,
       transition_ids=tuple(dict.fromkeys(transition_ids)),
       text_ids=tuple(dict.fromkeys(text_ids)),
@@ -802,7 +774,7 @@ class HsmViewerServerController:
   def _getPendingBreakpointId(self) -> str | None:
     """Return the breakpoint id for the current pending step, if any."""
 
-    next_step = self._runtime.getNextStep()
+    next_step = self._getNextStep()
     if next_step is None:
       return None
     return self._breakpointIdForStep(next_step)
@@ -819,7 +791,7 @@ class HsmViewerServerController:
       return self._breakpointKey(
         kind,
         step["source_state_id"],
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "change_active_state":
       return self._breakpointKey(kind, step["target_state_id"])
@@ -828,14 +800,14 @@ class HsmViewerServerController:
         kind,
         step["source_state_id"],
         step["target_state_id"],
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "internal_transition" and event_id is not None and step["activity"] is not None:
       return self._breakpointKey(
         kind,
         step["source_state_id"],
         event_id,
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "external_transition" and event_id is not None and step["activity"] is not None:
       return self._breakpointKey(
@@ -843,7 +815,7 @@ class HsmViewerServerController:
         step["source_state_id"],
         event_id,
         step["target_state_id"],
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "guarded_transition" and event_id is not None and step["activity"] is not None:
       return self._breakpointKey(
@@ -851,7 +823,7 @@ class HsmViewerServerController:
         step["source_state_id"],
         event_id,
         "guard",
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "guard_branch_transition" and event_id is not None and step["activity"] is not None:
       return self._breakpointKey(
@@ -860,14 +832,14 @@ class HsmViewerServerController:
         event_id,
         str(step["result"]),
         step["target_state_id"],
-        self._callableKey(step["activity"]),
+        self._executableKey(step["activity"]),
       )
     if kind == "pending_guard_condition" and event_id is not None:
       return self._breakpointKey(
         "guard_condition",
         step["source_state_id"],
         event_id,
-        self._callableKey(step["guard_activity"]),
+        self._executableKey(step["guard_activity"]),
       )
     return None
 
@@ -876,20 +848,29 @@ class HsmViewerServerController:
 
     return "|".join("" if part is None else str(part) for part in parts)
 
-  def _callableKey(self, activity: dict[str, str]) -> str:
-    """Return one stable callable key matching render-layer text targeting."""
+  def _executableKey(self, activity: dict[str, str]) -> str:
+    """Return one stable executable key matching render-layer text targeting."""
 
+    if activity["kind"] == "model":
+      return activity["model_id"]
     return f"{activity['module']}.{activity['name']}"
+
+  def _executableLabel(self, activity: dict[str, str]) -> str:
+    """Return one readable executable label."""
+
+    if activity["kind"] == "model":
+      return activity["model_id"]
+    return activity["name"]
 
   def _formatHookName(self, section_name: str) -> str:
     """Return a readable label for one state hook section."""
 
     return "On entry" if section_name == "on_entry" else "On exit"
 
-  def _buildCurrentStateFocus(self) -> HsmViewerFocus:
+  def _buildCurrentStateFocus(self) -> ViewerFocus:
     """Resolve state-focus and trace-focus contexts for the viewer."""
 
-    return HsmViewerFocus(
+    return ViewerFocus(
       state_related_ids=self._buildStateModeRelatedIds(),
       trace_related_ids=self._buildTraceModeRelatedIds(),
       state_viewport_focus_ids=self._buildStateModeViewportFocusIds(),
@@ -934,10 +915,11 @@ class HsmViewerServerController:
   def _buildTraceModeRelatedIds(self) -> tuple[str, ...]:
     """Return the non-dimmed ids for focus-trace mode."""
 
-    if not self._runtime.getExecutionLog():
+    execution_log = self._getExecutionLog()
+    if not execution_log:
       return ()
 
-    trace = self._runtime.getExecutionLog()[-1]
+    trace = execution_log[-1]
     related_ids = self._buildHighlightFocusIds()
     state_ids = self._getTraceStateIds(trace)
     state_ids.update(self._getPendingTraceStateIds())
@@ -1175,10 +1157,11 @@ class HsmViewerServerController:
     if state_id is not None:
       return state_id
 
-    if not self._runtime.hasPendingExecution() or not self._runtime.getExecutionLog():
+    execution_log = self._getExecutionLog()
+    if not self._runtime.hasPendingExecution() or not execution_log:
       return None
 
-    trace = self._runtime.getExecutionLog()[-1]
+    trace = execution_log[-1]
     if trace["event"]["event_id"] is not None:
       return None
 
@@ -1211,7 +1194,7 @@ class HsmViewerServerController:
   def _getPendingTraceStateIds(self) -> set[str]:
     """Return states semantically owned by the next pending debugger step."""
 
-    next_step = self._runtime.getNextStep()
+    next_step = self._getNextStep()
     if next_step is None:
       return set()
 
@@ -1251,11 +1234,12 @@ class HsmViewerServerController:
   def _isPendingInitialTracePreviewMode(self) -> bool:
     """Return whether the runtime is paused before the first init step executes."""
 
+    execution_log = self._getExecutionLog()
     return (
       self._runtime.isPaused()
       and self._runtime.hasPendingExecution()
-      and bool(self._runtime.getExecutionLog())
-      and self._runtime.getExecutionLog()[-1]["event"]["event_id"] is None
+      and bool(execution_log)
+      and execution_log[-1]["event"]["event_id"] is None
     )
 
   def _buildTraceTransitionIds(
@@ -1606,9 +1590,10 @@ class HsmViewerServerController:
   def _getPendingEventId(self) -> str | None:
     """Return the event id for the currently pending trace, if any."""
 
-    if not self._runtime.hasPendingExecution() or not self._runtime.getExecutionLog():
+    execution_log = self._getExecutionLog()
+    if not self._runtime.hasPendingExecution() or not execution_log:
       return None
-    return self._runtime.getExecutionLog()[-1]["event"]["event_id"]
+    return execution_log[-1]["event"]["event_id"]
 
   def _getGuardedTransitionIds(
     self,
@@ -1628,257 +1613,145 @@ class HsmViewerServerController:
     self._model.getEventById(event_id)
 
   def _requireDeclaredVariableId(self, variable_id: str) -> None:
-    """Reject one variable id that is not declared by the current model."""
+    """Reject one variable id that is not declared by the current context."""
 
-    self._model.getVariableByName(variable_id)
+    if self._context is None:
+      raise KeyError(f"Unknown variable_id '{variable_id}'.")
+    self._context.getVariableByName(variable_id)
 
 
-class HsmViewerRequestHandler(BaseHTTPRequestHandler):
-  """Serve static assets plus a small runtime API for one HSM viewer."""
+class HsmProjectViewerServerController(HsmViewerServerController):
+  """HSM viewer controller backed by a multi-model project registry."""
 
-  def __init__(
-    self,
-    *args: Any,
-    controller: HsmViewerServerController,
-    **kwargs: Any,
-  ) -> None:
-    """Bind one viewer controller to one handler instance."""
+  def __init__(self, registry: ProjectRegistry) -> None:
+    """Initialize the controller from one loaded project registry."""
 
-    self._controller = controller
-    super().__init__(*args, **kwargs)
+    entrypoint_model = registry.getEntrypointModel()
+    if not isinstance(entrypoint_model, HsmModel):
+      raise TypeError("HSM project viewer requires an HSM entrypoint model.")
 
-  def do_GET(self) -> None:
-    """Serve one static asset or one read-only session endpoint."""
+    self._registry = registry
+    self._rendered_svgs = self._renderProjectModels(registry)
+    super().__init__(entrypoint_model, registry.getContext())
 
-    if self.path == "/":
-      self._serveStatic("index.html", "text/html; charset=utf-8")
-      return
-    if self._tryServeStaticPath():
-      return
-    if self.path == "/api/session.json":
-      self._sendJson(asdict(self._controller.getSession()))
-      return
-    if self.path == "/artifacts/diagram.svg":
-      self._sendBytes(
-        self._controller.getSvgText().encode("utf-8"),
-        content_type="image/svg+xml; charset=utf-8",
-      )
-      return
+  def getModelSvgText(self, model_id: str) -> str:
+    """Return the rendered SVG document for one project model id."""
 
-    self.send_error(404)
-
-  def do_POST(self) -> None:
-    """Serve one mutating runtime endpoint."""
-
-    if self.path == "/api/runtime/reset":
-      self._readJsonBody()
-      self._sendJson(asdict(self._controller.reset()))
-      return
-
-    if self.path == "/api/runtime/events":
-      payload = self._readJsonBody()
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.sendEvent(
-              str(payload["event_id"]),
-              payload.get("parameters") if isinstance(payload.get("parameters"), dict) else None,
-            )
-          )
-        )
-      except (KeyError, ValueError) as error:
-        self.send_error(400, str(error))
-      return
-
-    if self.path == "/api/runtime/play":
-      self._readJsonBody()
-      self._sendJson(asdict(self._controller.play()))
-      return
-
-    if self.path == "/api/runtime/pause":
-      self._readJsonBody()
-      self._sendJson(asdict(self._controller.pause()))
-      return
-
-    if self.path == "/api/runtime/step":
-      self._readJsonBody()
-      self._sendJson(asdict(self._controller.stepExecution()))
-      return
-
-    if self.path == "/api/runtime/variables":
-      payload = self._readJsonBody()
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.setVariable(
-              str(payload["variable_id"]),
-              payload.get("value"),
-            )
-          )
-        )
-      except (KeyError, ValueError) as error:
-        self.send_error(400, str(error))
-      return
-
-    if self.path == "/api/debugger/breakpoints/toggle":
-      payload = self._readJsonBody()
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.toggleBreakpoint(str(payload["breakpoint_id"]))
-          )
-        )
-      except KeyError as error:
-        self.send_error(400, str(error))
-      return
-
-    if self.path == "/api/debugger/breakpoints/remove":
-      payload = self._readJsonBody()
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.removeBreakpoint(str(payload["breakpoint_id"]))
-          )
-        )
-      except KeyError as error:
-        self.send_error(400, str(error))
-      return
-
-    if self.path == "/api/debugger/breakpoints/enabled":
-      payload = self._readJsonBody()
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.setBreakpointEnabled(
-              str(payload["breakpoint_id"]),
-              bool(payload["enabled"]),
-            )
-          )
-        )
-      except KeyError as error:
-        self.send_error(400, str(error))
-      return
-
-    if self.path == "/api/debugger/breakpoints/order":
-      payload = self._readJsonBody()
-      breakpoint_ids = payload.get("breakpoint_ids", [])
-      if not isinstance(breakpoint_ids, list):
-        self.send_error(400, "'breakpoint_ids' must be a JSON array.")
-        return
-      try:
-        self._sendJson(
-          asdict(
-            self._controller.reorderBreakpoints(
-              [str(breakpoint_id) for breakpoint_id in breakpoint_ids]
-            )
-          )
-        )
-      except (KeyError, ValueError) as error:
-        self.send_error(400, str(error))
-      return
-
-    self.send_error(404)
-
-  def log_message(self, format: str, *args: Any) -> None:
-    """Suppress default console request logging for local viewer use."""
-
-    return
-
-  def _readJsonBody(self) -> dict[str, object]:
-    """Read and decode one JSON request body."""
-
-    content_length = int(self.headers.get("Content-Length", "0"))
-    raw_body = self.rfile.read(content_length)
-    if not raw_body:
-      return {}
     try:
-      return json.loads(raw_body.decode("utf-8"))
-    except JSONDecodeError as error:
-      self.send_error(400, f"Invalid JSON body: {error.msg}")
-      return {}
+      return self._rendered_svgs[model_id].getSvgText()
+    except KeyError as error:
+      raise KeyError(f"Unknown model_id '{model_id}'.") from error
 
-  def _serveStatic(self, file_name: str, content_type: str) -> None:
-    """Serve one static viewer asset from the package static directory."""
+  def _getViewerModels(self) -> tuple[dict[str, object], ...]:
+    """Return executable project models available to the viewer session."""
 
-    self._sendBytes(
-      (_STATIC_DIR / file_name).read_bytes(),
-      content_type=content_type,
+    entrypoint_id = self._model.getDocumentId()
+    return tuple(
+      {
+        "model_id": model.getDocumentId(),
+        "kind": "hsm" if isinstance(model, HsmModel) else "activity",
+        "svg_url": f"/artifacts/models/{model.getDocumentId()}/diagram.svg",
+        "is_entrypoint": model.getDocumentId() == entrypoint_id,
+      }
+      for model in self._registry.iterExecutableModels()
     )
 
-  def _tryServeStaticPath(self) -> bool:
-    """Serve one package static file when the request path maps to it safely."""
+  def _getActiveModelId(self) -> str:
+    """Return the model id currently emphasized by this controller."""
 
-    parsed_path = urlparse(self.path).path
-    if parsed_path in {"", "/"}:
-      return False
+    return self._model.getDocumentId()
 
-    relative_path = parsed_path.removeprefix("/")
-    static_path = (_STATIC_DIR / relative_path).resolve()
-    if not static_path.is_file():
-      return False
-    if _STATIC_DIR.resolve() not in static_path.parents:
-      self.send_error(403)
-      return True
+  def _buildRuntime(self) -> Runtime:
+    """Create and initialize one fresh runtime from the project registry."""
 
-    content_type, _ = mimetypes.guess_type(static_path.name)
-    if content_type is None:
-      content_type = "application/octet-stream"
-    if content_type.startswith("text/") or content_type in {
-      "application/javascript",
-      "image/svg+xml",
-    }:
-      content_type = f"{content_type}; charset=utf-8"
+    runtime = Runtime()
+    runtime.init(self._registry)
+    return runtime
 
-    self._sendBytes(static_path.read_bytes(), content_type=content_type)
-    return True
+  def _renderProjectModels(self, registry: ProjectRegistry) -> dict[str, Any]:
+    """Render every executable project model by document id."""
 
-  def _sendJson(self, payload: dict[str, object]) -> None:
-    """Serialize and send one JSON response payload."""
-
-    self._sendBytes(
-      json.dumps(payload).encode("utf-8"),
-      content_type="application/json; charset=utf-8",
-    )
-
-  def _sendBytes(self, body: bytes, *, content_type: str) -> None:
-    """Send one raw response body with the given content type."""
-
-    self.send_response(200)
-    self.send_header("Content-Type", content_type)
-    self.send_header("Content-Length", str(len(body)))
-    self.end_headers()
-    self.wfile.write(body)
+    rendered_svgs: dict[str, Any] = {}
+    for model in registry.iterExecutableModels():
+      model_id = model.getDocumentId()
+      if isinstance(model, HsmModel):
+        rendered = HsmRender()
+      elif isinstance(model, ActivityModel):
+        rendered = ActivityRender()
+      else:
+        continue
+      rendered.render(model)
+      rendered_svgs[model_id] = rendered
+    return rendered_svgs
 
 
 def startHsmViewerServer(
   model: HsmModel,
   *,
+  context: ContextModel | None = None,
   host: str = "127.0.0.1",
   port: int = 0,
-) -> RunningHsmViewerServer:
+) -> RunningViewerServer:
   """Start one local HSM viewer HTTP server for the given model."""
 
-  controller = HsmViewerServerController(model)
-  httpd = ThreadingHTTPServer(
-    (host, port),
-    partial(HsmViewerRequestHandler, controller=controller),
+  return startViewerServer(
+    HsmViewerServerController(model, context),
+    host=host,
+    port=port,
   )
-  thread = Thread(target=httpd.serve_forever, daemon=True)
-  thread.start()
-  return RunningHsmViewerServer(httpd, thread)
+
+
+def startHsmProjectViewerServer(
+  registry: ProjectRegistry,
+  *,
+  host: str = "127.0.0.1",
+  port: int = 0,
+) -> RunningViewerServer:
+  """Start one local HSM viewer HTTP server for a loaded project."""
+
+  return startViewerServer(
+    HsmProjectViewerServerController(registry),
+    host=host,
+    port=port,
+  )
+
+
+def startHsmProjectViewerServerFromProjectPath(
+  project_path: str | Path,
+  *,
+  host: str = "127.0.0.1",
+  port: int = 0,
+  open_browser: bool = False,
+) -> RunningViewerServer:
+  """Load one project file and start the local HSM viewer server."""
+
+  server = startHsmProjectViewerServer(
+    ProjectRegistry.load(project_path),
+    host=host,
+    port=port,
+  )
+  if open_browser:
+    webbrowser.open(server.base_url)
+  return server
 
 
 def startHsmViewerServerFromModelPath(
   model_path: str | Path,
   *,
+  context_path: str | Path | None = None,
   host: str = "127.0.0.1",
   port: int = 0,
   open_browser: bool = False,
-) -> RunningHsmViewerServer:
+) -> RunningViewerServer:
   """Load one HSM model file and start the local viewer server."""
 
   server = startHsmViewerServer(
     HsmModel.loadAndValidate(model_path),
+    context=(
+      None
+      if context_path is None
+      else ContextModel.loadAndValidate(context_path)
+    ),
     host=host,
     port=port,
   )
@@ -1892,6 +1765,7 @@ def main(argv: list[str] | None = None) -> int:
 
   parser = argparse.ArgumentParser(description="Launch the MBSE HSM web viewer.")
   parser.add_argument("model_path")
+  parser.add_argument("--context-path")
   parser.add_argument("--host", default="127.0.0.1")
   parser.add_argument("--port", default=0, type=int)
   parser.add_argument("--open-browser", action="store_true")
@@ -1899,6 +1773,7 @@ def main(argv: list[str] | None = None) -> int:
 
   server = startHsmViewerServerFromModelPath(
     args.model_path,
+    context_path=args.context_path,
     host=args.host,
     port=args.port,
     open_browser=args.open_browser,

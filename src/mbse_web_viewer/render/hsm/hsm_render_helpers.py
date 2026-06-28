@@ -36,19 +36,23 @@ _ANCHOR_TAG = ANCHOR_TAG
 # Domain helpers.
 
 
-def callableKey(activity: dict[str, str] | str) -> str:
-  """Return one stable key for one callable reference or literal name."""
+def executableKey(activity: dict[str, str] | str) -> str:
+  """Return one stable key for one executable reference or literal name."""
 
   if isinstance(activity, str):
     return activity
+  if activity["kind"] == "model":
+    return activity["model_id"]
   return f"{activity['module']}.{activity['name']}"
 
 
-def callableLabel(activity: dict[str, str] | str) -> str:
+def executableLabel(activity: dict[str, str] | str) -> str:
   """Return the human-readable label used in rendered text."""
 
   if isinstance(activity, str):
     return activity
+  if activity["kind"] == "model":
+    return activity["model_id"]
   return activity["name"]
 
 
@@ -323,7 +327,7 @@ def _appendStateHookSection(
         _activityBulletLine(
           activity=activity,
           target_payload=(
-            f"state_hook_activity|{state_id}|{section_name}|{callableKey(activity)}"
+            f"state_hook_activity|{state_id}|{section_name}|{executableKey(activity)}"
           ),
         )
         for activity in activities
@@ -343,7 +347,7 @@ def _activityBulletLine(
     fragments=(
       types.RenderTextFragment(text="- "),
       types.RenderTextFragment(
-        text=callableLabel(activity),
+        text=executableLabel(activity),
         target_payload=target_payload,
       ),
     )
@@ -480,8 +484,8 @@ def _activityFragments(
       fragments.append(types.RenderTextFragment(text=", "))
     fragments.append(
       types.RenderTextFragment(
-        text=callableLabel(activity),
-        target_payload=f"{payload_prefix}|{edge_id}|{callableKey(activity)}",
+        text=executableLabel(activity),
+        target_payload=f"{payload_prefix}|{edge_id}|{executableKey(activity)}",
       )
     )
   return fragments

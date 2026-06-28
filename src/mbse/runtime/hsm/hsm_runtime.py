@@ -3,14 +3,16 @@ from __future__ import annotations
 """HSM runtime API and internal implementation contract."""
 
 from copy import deepcopy
-import importlib
-from types import SimpleNamespace
 from typing import Any
 from typing import Literal
 from typing import TypeAlias
 from typing import TypedDict
 
+from mbse.model.context.context_model import ContextModel
 from mbse.model.hsm.hsm_model import HsmModel
+
+
+HsmRuntimeExecutableRef: TypeAlias = dict[str, Any]
 
 
 class HsmRuntimeEvent(TypedDict):
@@ -18,13 +20,6 @@ class HsmRuntimeEvent(TypedDict):
 
   event_id: str | None
   parameters: dict[str, Any]
-
-
-class HsmRuntimeCallableRef(TypedDict):
-  """Reference to one Python callable declared by the model."""
-
-  module: str
-  name: str
 
 
 class HsmRuntimeInitialTransition(TypedDict):
@@ -35,7 +30,7 @@ class HsmRuntimeInitialTransition(TypedDict):
   source_state_label: str | None
   target_state_id: str
   target_state_label: str
-  activity: HsmRuntimeCallableRef | None
+  activity: HsmRuntimeExecutableRef | None
 
 
 class HsmRuntimeExternalTransition(TypedDict):
@@ -46,7 +41,7 @@ class HsmRuntimeExternalTransition(TypedDict):
   source_state_label: str
   target_state_id: str
   target_state_label: str
-  activity: HsmRuntimeCallableRef | None
+  activity: HsmRuntimeExecutableRef | None
 
 
 class HsmRuntimeGuardedTransition(TypedDict):
@@ -55,7 +50,7 @@ class HsmRuntimeGuardedTransition(TypedDict):
   kind: Literal["guarded_transition"]
   source_state_id: str
   source_state_label: str
-  activity: HsmRuntimeCallableRef | None
+  activity: HsmRuntimeExecutableRef | None
 
 
 class HsmRuntimeGuardBranchTransition(TypedDict):
@@ -67,7 +62,7 @@ class HsmRuntimeGuardBranchTransition(TypedDict):
   target_state_id: str
   target_state_label: str
   result: bool
-  activity: HsmRuntimeCallableRef | None
+  activity: HsmRuntimeExecutableRef | None
 
 
 class HsmRuntimeInternalTransition(TypedDict):
@@ -76,7 +71,7 @@ class HsmRuntimeInternalTransition(TypedDict):
   kind: Literal["internal_transition"]
   source_state_id: str
   source_state_label: str
-  activity: HsmRuntimeCallableRef | None
+  activity: HsmRuntimeExecutableRef | None
 
 
 class HsmRuntimeGuardCondition(TypedDict):
@@ -85,7 +80,7 @@ class HsmRuntimeGuardCondition(TypedDict):
   kind: Literal["guard_condition"]
   source_state_id: str
   source_state_label: str
-  guard_activity: HsmRuntimeCallableRef
+  guard_activity: HsmRuntimeExecutableRef
   result: bool
   target_state_id: str
   target_state_label: str
@@ -97,7 +92,7 @@ class HsmRuntimeOnEntry(TypedDict):
   kind: Literal["on_entry"]
   source_state_id: str
   source_state_label: str
-  activity: HsmRuntimeCallableRef
+  activity: HsmRuntimeExecutableRef
 
 
 class HsmRuntimeOnExit(TypedDict):
@@ -106,7 +101,7 @@ class HsmRuntimeOnExit(TypedDict):
   kind: Literal["on_exit"]
   source_state_id: str
   source_state_label: str
-  activity: HsmRuntimeCallableRef
+  activity: HsmRuntimeExecutableRef
 
 
 class HsmRuntimeChangeActiveState(TypedDict):
@@ -150,7 +145,7 @@ class HsmRuntimePendingGuardCondition(TypedDict):
   kind: Literal["pending_guard_condition"]
   source_state_id: str
   source_state_label: str
-  guard_activity: HsmRuntimeCallableRef
+  guard_activity: HsmRuntimeExecutableRef
   true_target_state_id: str
   true_target_state_label: str
   true_branch: list[HsmRuntimePendingExecutionTypeAlias]
@@ -202,8 +197,9 @@ class HsmRuntime:
     self.execution_log: list[HsmRuntimeTrace] = []
     self.pending_execution: HsmRuntimePendingTrace | None = None
     self.event_queue: list[HsmRuntimeEvent] = []
+    self.executable_handler: Any | None = None
 
-  def init(self, model: HsmModel) -> None:
+  def init(self, model: HsmModel, context: ContextModel | None = None) -> None:
     """Initialize or fully reinitialize the runtime from one loaded HSM model.
 
     The runtime is reset to its authored variable defaults, bootstrap
@@ -214,9 +210,10 @@ class HsmRuntime:
     self.is_paused = True
     self.current_state_id = None
     # Copy authored defaults so runtime mutation never aliases the model payload.
+    variable_declarations = [] if context is None else context.getVariables()
     self.variables = {
       variable["name"]: deepcopy(variable["default_value"])
-      for variable in model.getVariables()
+      for variable in variable_declarations
     }
     self.execution_log = []
     self.pending_execution = None
@@ -350,6 +347,14 @@ class HsmRuntime:
       return None
     return deepcopy(pending_execution["entries"][0])
 
+  def setExecutableHandler(
+    self,
+    executable_handler: Any | None,
+  ) -> None:
+    """Set the upper-layer executable handler."""
+
+    self.executable_handler = executable_handler
+
   def _planNextQueuedEvent(self) -> bool:
     """Plan the next queued event when no trace is currently in progress."""
 
@@ -421,7 +426,7 @@ class HsmRuntime:
       self.current_state_id = entry["target_state_id"]
       self.execution_log[-1]["entries"].append(entry)
     else:
-      # Callable steps are the only ones with user-code side effects.
+      # Executable steps are the only ones with user-code side effects.
       if entry["activity"] is not None:
         self._callActivity(entry["activity"], pending_execution["event"])
       self.execution_log[-1]["entries"].append(entry)
@@ -455,7 +460,7 @@ class HsmRuntime:
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     source_state_id: str | None,
     target_state_id: str,
-    activity: HsmRuntimeCallableRef | None,
+    activity: HsmRuntimeExecutableRef | None,
   ) -> None:
     """Append one initial-transition runtime step."""
 
@@ -478,7 +483,7 @@ class HsmRuntime:
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     source_state_id: str,
     target_state_id: str,
-    activity: HsmRuntimeCallableRef | None,
+    activity: HsmRuntimeExecutableRef | None,
   ) -> None:
     """Append one external-transition runtime step."""
 
@@ -498,7 +503,7 @@ class HsmRuntime:
     self,
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     source_state_id: str,
-    activity: HsmRuntimeCallableRef | None,
+    activity: HsmRuntimeExecutableRef | None,
   ) -> None:
     """Append one guarded-transition runtime step."""
 
@@ -518,7 +523,7 @@ class HsmRuntime:
     source_state_id: str,
     target_state_id: str,
     result: bool,
-    activity: HsmRuntimeCallableRef | None,
+    activity: HsmRuntimeExecutableRef | None,
   ) -> None:
     """Append one guard-branch runtime step."""
 
@@ -539,7 +544,7 @@ class HsmRuntime:
     self,
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     source_state_id: str,
-    activity: HsmRuntimeCallableRef | None,
+    activity: HsmRuntimeExecutableRef | None,
   ) -> None:
     """Append one internal-transition runtime step."""
 
@@ -557,7 +562,7 @@ class HsmRuntime:
     self,
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     state_id: str,
-    activity: HsmRuntimeCallableRef,
+    activity: HsmRuntimeExecutableRef,
   ) -> None:
     """Append one on_entry runtime step."""
 
@@ -574,7 +579,7 @@ class HsmRuntime:
     self,
     entries: list[HsmRuntimePendingExecutionTypeAlias],
     state_id: str,
-    activity: HsmRuntimeCallableRef,
+    activity: HsmRuntimeExecutableRef,
   ) -> None:
     """Append one on_exit runtime step."""
 
@@ -608,7 +613,7 @@ class HsmRuntime:
     source_state_id: str,
     target_state_id: str,
     external_transition: dict[str, Any],
-    branch_activities: list[HsmRuntimeCallableRef],
+    branch_activities: list[HsmRuntimeExecutableRef],
     branch_result: bool | None = None,
   ) -> list[HsmRuntimePendingExecutionTypeAlias]:
     """Build the deterministic pending entries for one chosen transition branch."""
@@ -934,52 +939,37 @@ class HsmRuntime:
 
   def _callActivity(
     self,
-    callable_ref: dict[str, str],
+    executable_ref: HsmRuntimeExecutableRef,
     event: HsmRuntimeEvent | None,
   ) -> Any:
-    """Resolve and execute one activity callable."""
+    """Execute one activity executable through the upper handler."""
 
-    return self._callRuntimeCallable(callable_ref, event)
+    return self._callRuntimeExecutable(executable_ref, event)
 
   def _callGuard(
     self,
-    callable_ref: dict[str, str],
+    executable_ref: HsmRuntimeExecutableRef,
     event: HsmRuntimeEvent,
   ) -> bool:
-    """Resolve and execute one guard callable and require a bool result."""
+    """Execute one guard executable and require a bool result."""
 
-    result = self._callRuntimeCallable(callable_ref, event)
+    result = self._callRuntimeExecutable(executable_ref, event)
 
     if not isinstance(result, bool):
-      raise TypeError("Guard callable must return a bool.")
+      raise TypeError("Guard executable must return a bool.")
 
     return result
 
-  def _callRuntimeCallable(
+  def _callRuntimeExecutable(
     self,
-    callable_ref: dict[str, str],
+    executable_ref: HsmRuntimeExecutableRef,
     event: HsmRuntimeEvent | None,
   ) -> Any:
-    """Resolve one runtime callable, execute it, and persist ctx mutations."""
+    """Execute one runtime executable through the upper handler."""
 
-    module = importlib.import_module(callable_ref["module"])
-    handler = getattr(module, callable_ref["name"])
-    ctx = SimpleNamespace(**self.variables)
-    ctx.variables = self.variables
-    ctx.event_id = event["event_id"] if event is not None else None
-    ctx.event_parameters = event["parameters"] if event is not None else {}
-    ctx.send_event = lambda nested_event_id, nested_parameters=None: self.sendEvent(
-      nested_event_id,
-      nested_parameters,
-    )
-
-    result = handler(ctx)
-
-    for name in self.variables:
-      if hasattr(ctx, name):
-        self.variables[name] = getattr(ctx, name)
-
-    return result
+    if self.executable_handler is None:
+      raise RuntimeError("Executables require an upper Runtime handler.")
+    return self.executable_handler(executable_ref, self, event)
 
   def _requireModel(self) -> HsmModel:
     """Return the initialized model or fail if the runtime is uninitialized."""

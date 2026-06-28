@@ -1,0 +1,37 @@
+digraph "{{ view.document_id }}" {
+  rankdir=LR;
+  graph [nodesep=0.45, ranksep=0.65];
+{% macro render_fragment_cell(fragment) -%}
+{%- if fragment.target_payload -%}
+<TD ALIGN="LEFT" HREF="" TOOLTIP="{{ fragment.target_payload|e }}">{{ fragment.text|e }}</TD>
+{%- else -%}
+<TD ALIGN="LEFT">{{ fragment.text|e }}</TD>
+{%- endif -%}
+{%- endmacro %}
+{% macro render_text_line(line) -%}
+<TR><TD ALIGN="CENTER"><TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR>{%- for fragment in line.fragments %}{{ render_fragment_cell(fragment) }}{%- endfor %}</TR></TABLE></TD></TR>
+{%- endmacro %}
+{% macro render_node_label(node) -%}
+<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6">
+{%- for line in node.label_lines %}
+{{ render_text_line(line) }}
+{%- endfor %}
+</TABLE>
+>
+{%- endmacro %}
+{% macro render_edge_label(label_line) -%}
+<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+{{ render_text_line(label_line) }}
+</TABLE>
+>
+{%- endmacro %}
+  "{{ view.initial_source_id }}" [id="{{ view.initial_source_id }}", shape=point, label="", width=0.1, height=0.1, fixedsize=true, style=filled, fillcolor=black, color=black];
+{% for node in view.nodes %}
+  "{{ node.svg_id }}" [id="{{ node.svg_id }}", shape={{ node.shape }}, label={{ render_node_label(node) }}, style="filled", fillcolor="#E8F0F7"];
+{% endfor %}
+{% for edge in view.edges %}
+  "{{ edge.source_id }}" -> "{{ edge.target_id }}" [id="{{ edge.svg_id }}", {% if edge.label_line %}label={{ render_edge_label(edge.label_line) }}{% else %}label=""{% endif %}];
+{% endfor %}
+}
